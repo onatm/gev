@@ -349,46 +349,70 @@ def smoke(data_root: Path = Path("data"), train_records: int = 128, dev_records:
 
 
 def token_length_audit(data_root: Path, config_path: str, marker_path: Path,
-                       *, augment_train: bool = False, seed: int = 0, epochs: int = 2,
+                       *, augment_train: bool = False, seed: int = 0, epochs: int | None = None,
+                       seeds: tuple[int, ...] | None = None,
                        output: Path = Path("runs/reference/token-length-audit.json")) -> dict[str, Any]:
     """Measure actual tokenizer lengths without changing or truncating source bytes."""
     from transformers import AutoTokenizer
-    from ..data.augmentation import augment, item_rng
+    from ..training.batching import variants_for_request
 
     config = load_config(config_path)
     tokenizer = AutoTokenizer.from_pretrained(config.model.name, revision=config.model.revision)
     markers = MarkerMap.load(marker_path, tokenizer)
     caps = {"state": config.training.state_cap, "branch": config.training.branch_cap,
             "packed": config.training.packed_cap}
+    epochs = config.training.epochs if epochs is None else epochs
+    seeds = (seed,) if seeds is None else seeds
+    if augment_train and (epochs < 1 or not seeds or any(s < 0 for s in seeds)):
+        raise ValueError("training audit requires positive epochs and non-negative seeds")
     partitions = (("decision-v7", "train"), ("decision-v7", "calibration"),
                   ("decision-v7", "development"), ("transfer-v4", "development"))
     manifest_cache = {suite: load_manifest(suite) for suite, _ in partitions}
     report: dict[str, Any] = {"model": config.model.name, "revision": config.model.revision,
                               "markers": markers.ids, "caps": caps, "partitions": {}}
 
-    def measure(name: str, rows: list[dict[str, Any]], variant: str) -> None:
-        values = {"records": len(rows), "questions": 0, "overflow_records": 0,
-                  "max_state": 0, "max_branch": 0, "max_packed": 0,
-                  "maxima": {}, "top": {"state": [], "branch": [], "packed": []}, "variant": variant}
+    def measure(name: str, rows: list[dict[str, Any]], variant: str, *,
+                training_seed: int | None = None, epoch: int = 0) -> None:
+        values = {"records": len(rows), "variants": 0, "questions": 0, "overflow_records": 0,
+                   "max_state": 0, "max_branch": 0, "max_packed": 0,
+                   "maxima": {}, "top": {"state": [], "branch": [], "packed": []},
+                   "overflow_by_cap": {kind: 0 for kind in caps}, "variant": variant}
         overflow_ids: set[str] = set()
         for row in rows:
-            record = materialize(row)
-            encoded = encode(tokenizer, record, markers, state_cap=10**9, branch_cap=10**9, packed_cap=10**9)
-            _, _, questions = rows_of(encoded)
-            values["questions"] += len(questions)
-            lengths = {"state": encoded["state_length"], "branch": max((len(q["ids"]) for q in questions), default=0),
-                       "packed": len(encoded["ids"])}
             ident = row.get("_meta", {}).get("id", "unknown")
-            for kind, length in lengths.items():
-                if length > values[f"max_{kind}"]:
-                    values[f"max_{kind}"] = length
-                    values["maxima"][kind] = {"id": ident, "length": length}
-                values["top"][kind].append({"id": ident, "length": length})
-                if length > caps[kind]:
-                    overflow_ids.add(ident)
+            if training_seed is None:
+                encodings = [("unaugmented", encode(tokenizer, materialize(row), markers,
+                              state_cap=10**9, branch_cap=10**9, packed_cap=10**9))]
+            else:
+                variants = variants_for_request(row, seed=training_seed, epoch=epoch,
+                            tokenizer=tokenizer, markers=markers, caps=(10**9, 10**9, 10**9),
+                            p_none=config.training.p_none, p_none_distract=config.training.p_none_distract,
+                            p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair)
+                encodings = [(v.variant, v.encoding) for v in variants]
+            for kind_name, encoded in encodings:
+                _, _, questions = rows_of(encoded)
+                values["variants"] += 1
+                values["questions"] += len(questions)
+                lengths = {"state": encoded["state_length"],
+                           "branch": encoded["state_length"] + max((len(q["ids"]) for q in questions), default=0),
+                           "packed": len(encoded["ids"])}
+                entry = {"id": ident, "variant": kind_name}
+                for kind, length in lengths.items():
+                    item = {**entry, "length": length}
+                    if length > values[f"max_{kind}"]:
+                        values[f"max_{kind}"] = length
+                        values["maxima"][kind] = item
+                    top = values["top"][kind]
+                    top.append(item)
+                    if len(top) > 10:
+                        top.sort(key=lambda value: (-value["length"], value["id"], value["variant"]))
+                        top.pop()
+                    if length > caps[kind]:
+                        overflow_ids.add(ident)
+                        values["overflow_by_cap"][kind] += 1
         values["overflow_records"] = len(overflow_ids)
         for kind in values["top"]:
-            values["top"][kind] = sorted(values["top"][kind], key=lambda item: (-item["length"], item["id"]))[:10]
+            values["top"][kind].sort(key=lambda item: (-item["length"], item["id"], item["variant"]))
         report["partitions"][name] = values
 
     for suite, split in partitions:
@@ -396,9 +420,10 @@ def token_length_audit(data_root: Path, config_path: str, marker_path: Path,
         rows = load_split(path, suite, split, manifest_cache[suite])
         measure(f"{suite}/{split}/unaugmented", rows, "unaugmented")
         if augment_train and suite == "decision-v7" and split == "train":
-            for epoch in range(epochs):
-                augmented = [augment(row, item_rng(seed, epoch, row["_meta"]["id"])) for row in rows]
-                measure(f"{suite}/{split}/augmented_epoch_{epoch + 1}", augmented, "augmented")
+            for training_seed in seeds:
+                for epoch in range(epochs):
+                    measure(f"{suite}/{split}/seed_{training_seed}/epoch_{epoch + 1}", rows,
+                            "training", training_seed=training_seed, epoch=epoch)
     atomic_write(output, (json.dumps(report, indent=2, sort_keys=True) + "\n").encode())
     report["output"] = str(output)
     return report

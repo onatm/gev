@@ -175,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             check.add_argument("--config", default=None)
             check.add_argument("--markers", default=None)
             check.add_argument("--augment", action="store_true")
+            check.add_argument("--seeds", default="0,1,2", help="training seeds for token audit")
             check.add_argument("--data-root", default="data")
             check.add_argument("--output", default="runs/reference/token-length-audit.json")
     smoke_cmd = data_commands.add_parser("smoke", help="write a group-preserving structural child suite")
@@ -221,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:
             root = Path("references/suites") / args.suite
             if args.data_command == "audit" and args.config and args.markers:
                 result = token_length_audit(Path(args.data_root), args.config, Path(args.markers),
-                                            augment_train=args.augment, output=Path(args.output))
+                                             augment_train=args.augment,
+                                             seeds=tuple(int(s) for s in args.seeds.split(",")),
+                                             output=Path(args.output))
                 print(json.dumps(result, indent=2, sort_keys=True)); return 0
             with tempfile.TemporaryDirectory() as directory:
                 manifest = fetch_manifest(args.suite, Path(directory) / "manifest.json")

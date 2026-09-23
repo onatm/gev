@@ -93,8 +93,11 @@ globally. These details come from the pinned [Google Gemma documentation](https:
 and the [HF Gemma 3 implementation](https://github.com/huggingface/transformers/tree/v5.17.0/src/transformers/models/gemma3).
 
 Context is 384 including the state marker. State plus one question is capped at
-1,024 and a whole packed example at 2,048. Every branch starts at the same
-state position `S`, not `S+iB`. Gev's custom local mask compares logical
+2,048 and a whole packed example at 2,048. The observed maximum state-plus-branch
+length over the pinned non-test splits and the exact three-seed, two-epoch
+training variants (including none pairs) is 1,037.
+The encoder pads to the actual batch maximum, not the cap. Every branch starts at
+the same state position `S`, not `S+iB`. Gev's custom local mask compares logical
 positions; HF's ordinary sliding-mask builder uses physical attention indices.
 A single prepared 4D mask can bypass that builder for both layer types, so
 separate prepared masks are required. A packed prefix must not be cropped

@@ -56,8 +56,24 @@ mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \
   --seeds 0,1,2 --data data --out runs/study-v7 --dry-run
 ```
 
-Once the plan and resources are reviewed, run it using a fresh, unique output
-directory (omit `--dry-run`):
+Before loading model weights, audit actual token lengths for all three seeds,
+both epochs, and the non-test evaluation splits. The audit checks state plus
+each question against the branch cap and includes none-pair variants. Confirm
+every partition reports `overflow_records: 0`:
+
+```bash
+mise exec -- uv run gev data audit decision-v7 train data/decision-v7/train.jsonl \
+  --config configs/gemma3-1b-v7.toml \
+  --markers runs/reference/model-marker-map.json --augment \
+  --output runs/reference/v7-token-length-audit.json
+```
+
+The verified maximum state-plus-question length for seeds 0, 1, and 2 is
+1,037 tokens. The branch cap is 2,048; row tensors are padded to the actual
+batch maximum, not to this limit.
+
+Once the plan, token audit, and resources are reviewed, run it using a fresh,
+unique output directory (omit `--dry-run`):
 
 ```bash
 mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \

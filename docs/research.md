@@ -24,8 +24,9 @@ research facts distinct from Gev observations.
 1. Use Gemma’s actual reserved rows for five semantic markers; no vocabulary
    resize or automatic BOS insertion. Escape control-token-like user content
    before tokenization. The verified map is IDs 6–10.
-2. Use 384 context including the state marker, 1,024 state+question, and 2,048
-   whole-packed caps. Every branch starts at position `S`.
+2. Use 384 context including the state marker, 2,048 state+question, and 2,048
+   whole-packed caps. The observed maximum is 1,037 for the exact three-seed
+   training stream. Every branch starts at position `S`.
 3. Keep full and sliding packed masks separate. Full attention permits causal
    state/same-question access; native local attention additionally checks the
    logical 512-token distance. Physical packed indices are not local positions.
