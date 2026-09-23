@@ -36,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--temperature", type=float); evaluate.add_argument("--device", choices=("cpu", "mps"))
     evaluate.add_argument("--execution", choices=("rows", "packed"))
 
+    predict = commands.add_parser("predict", help="predict an unlabeled Kev-style request")
+    predict.add_argument("run", help="current-format checkpoint run or checkpoint directory")
+    predict.add_argument("--config", help="override the saved checkpoint configuration")
+    predict.add_argument("--input", required=True, help="JSON request file or '-' for stdin")
+    predict.add_argument("--temperature", type=float, default=1.0, help="inference temperature (default: raw T=1)")
+    predict.add_argument("--device", choices=("cpu", "mps"))
+
     calibrate = commands.add_parser("calibrate", help="fit a protocol-approved temperature from saved rows")
     calibrate.add_argument("--run", required=True); calibrate.add_argument("--rows")
     calibrate.add_argument("--protocol", choices=("kev-screening", "kev-release"), default="kev-screening")

@@ -12,6 +12,9 @@ def dispatch(args) -> int:
     if args.command == "evaluate":
         from .evaluate import handle_evaluate
         return handle_evaluate(args)
+    if args.command == "predict":
+        from .predict import handle_predict
+        return handle_predict(args)
     if args.command == "calibrate":
         from .analysis import handle_calibrate
         return handle_calibrate(args)
