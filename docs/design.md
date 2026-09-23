@@ -1,9 +1,9 @@
 # Gev technical design and research record
 
-This document records the researched design and separates published reference
-results from observations made in Gev smoke/diagnostic runs. Gev has no
-comparable full-study result; the bounded local measurements are not full
-three-seed v7 or full Night 2 results.
+This document records the researched design and separates published Kev
+reference results from Gev observations. The completed three-seed v7 study and
+selected checkpoint's locked test are reported in [Gev v7 results](results/gev-v7.md).
+The bounded smoke/diagnostic measurements below are not full-study results.
 
 ## Source pins and evidence boundary
 
@@ -24,8 +24,8 @@ especially `modeling_gemma3.py`, `configuration_gemma3.py`, `masking_utils.py`,
 lock, not an inference from source links.
 
 The evidence boundary is strict: published Kev values below are research
-baseline; Gev smoke values are observed local diagnostics. No full Gev test
-result is claimed.
+baselines; Gev smoke values are local diagnostics. Gev's full v7 measurements
+and their provenance are kept in the separate [results report](results/gev-v7.md).
 
 ## Configuration, rendering, and markers
 
@@ -143,8 +143,8 @@ path `v7/decision-v7/train.jsonl`, SHA-256
 | transfer test | 764 | 764 (656 clean + 108 variants) |
 
 The decision clean scored counts differ from full manifest counts; they are not
-interchangeable. Published metadata was not treated as test contents in this
-session.
+interchangeable. The test partitions were accessed only for the selected
+checkpoint's [locked evaluation](results/gev-v7.md#locked-test-selected-seed-0-only).
 
 The public pool is v4, not v6: 1,000 samples per source, 3,180 train and 600
 eval candidates, pool seed `20260919`, row-hash/dedup ordering, 64 headroom,

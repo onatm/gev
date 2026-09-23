@@ -1,9 +1,9 @@
 # Data and model provenance
 
 This ledger describes the data workflow and immutable identities. The declared
-non-test partitions have been fetched and verified; test contents are kept
-behind the locked evaluation path and are not used for training or development
-evaluation.
+non-test partitions have been fetched and verified; test contents were used
+only for the selected checkpoint's [locked evaluation](results/gev-v7.md),
+never for training or development evaluation.
 
 ## Model
 
@@ -31,9 +31,9 @@ The authoritative v7 manifest SHA-256 is
 | decision train | 12,576 | 15,576 | fetched/verified workflow |
 | decision calibration | 968 | 1,148 | fetched/verified workflow |
 | decision development | 1,204 | 1,468 | fetched/verified workflow |
-| decision test | 1,176 | 1,440 | metadata locked; contents not read in this session |
+| decision test | 1,176 | 1,440 | fetched/verified; selected checkpoint evaluated once |
 | transfer development | 764 | 764 (656 clean + 108 variants) | fetched/verified |
-| transfer test | 764 | 764 (656 clean + 108 variants) | metadata locked; contents not read |
+| transfer test | 764 | 764 (656 clean + 108 variants) | fetched/verified; selected checkpoint evaluated once |
 
 Clean scored decision development/test contain 1,264/1,200 questions;
 they are clean views, not full manifest populations. Do not describe v7 as

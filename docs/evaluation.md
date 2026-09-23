@@ -18,3 +18,8 @@ head exactly once. It records served and restored raw logits; reports expose
 additional benchmark temperature of `1`, preventing accidental double
 calibration. Evaluation provenance includes the suite/manifest hash, split
 source hash, and checkpoint fingerprint.
+
+The completed v7 study and selected checkpoint's once-only test measurements
+are published with metric-only JSON snapshots in
+[Gev v7 results](results/gev-v7.md). The locked reports used raw temperature
+one; screening calibration was not applied to the checkpoint.

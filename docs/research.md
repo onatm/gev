@@ -45,7 +45,8 @@ research facts distinct from Gev observations.
    grid; release ID development 121-point grouped OOF; 1,000 clustered
    bootstrap; raw fp32 T=1 inputs and no double temperature.
 8. Treat the historical Kev table as baseline only. Gev smoke numbers and
-   packed checks are observed diagnostics, never full-study results.
+   packed checks are observed diagnostics, never full-study results. The full
+   v7 study and locked test are reported in [Gev v7 results](results/gev-v7.md).
 
 For the reproduction workflow and CLI entry points, see
 [reproduction.md](reproduction.md). Acquisition, hashes, counts, and

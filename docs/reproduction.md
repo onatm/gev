@@ -1,8 +1,9 @@
 # Reproduction workflow
 
 This guide separates the pinned research recipe from bounded smoke and runtime
-diagnostics. There is currently no comparable full Gev three-seed score. Do not
-interpret smoke, partial, or one-step pipeline output as a reproduction.
+diagnostics. The completed three-seed study and locked-test results are in
+[Gev v7 results](results/gev-v7.md). Do not interpret smoke, partial, or
+one-step pipeline output as a reproduction.
 
 ## Prerequisites and non-test data
 
@@ -44,6 +45,56 @@ full-data pipeline diagnostic covered calibration 968/1,148, development
 1,204/1,468, and transfer 764/764 records/questions, with full coverage and no
 rejections/truncations; this is evaluation-path evidence only, not full
 training or a comparable Gev score.
+
+## Manual prediction on a live request
+
+`gev predict` accepts one unlabeled Kev-style request as JSON, either from a
+file or stdin. It loads the selected run's checkpoint using that run's saved
+config, verifies the pinned tokenizer markers and checkpoint contract, and
+prints per-question probabilities and the winning option as JSON. The default
+is raw temperature 1; `--temperature` can explicitly set another positive
+temperature, applied once. This is an inference-only convenience: it does not
+call the evaluation pipeline, read any suite or locked-test data, or write run
+artifacts. Gated model access is still required.
+
+For example, compare a return on day 12 with one on day 45 against a 30-day
+return policy using the completed study's selected seed-0 checkpoint:
+
+```bash
+mise exec -- uv run gev predict \
+  --run runs/gev-v7/seed-0 \
+  --config runs/gev-v7/configs/seed-0.toml \
+  --input - <<'JSON'
+{
+  "state": "The store accepts returns within 30 days of delivery.",
+  "questions": {
+    "return-day-12": {
+      "type": "choice",
+      "instructions": "Should the store accept this return request? The request was made 12 days after delivery.",
+      "criteria": {
+        "accept": "Accept the return request.",
+        "reject": "Reject the return request."
+      }
+    },
+    "return-day-45": {
+      "type": "choice",
+      "instructions": "Should the store accept this return request? The request was made 45 days after delivery.",
+      "criteria": {
+        "accept": "Accept the return request.",
+        "reject": "Reject the return request."
+      }
+    }
+  }
+}
+JSON
+```
+
+The result preserves question IDs and option keys (`accept`/`reject`). Choice,
+`noul`, and `score` questions are supported. Labels are neither required nor
+used, even if extra label fields are present in the request. Use
+`--input request.json` instead of `--input -` to read from a file. This command
+only tests model behavior on the supplied request; it is not an evaluation
+result.
 
 ## Plan and run the full study
 
@@ -137,7 +188,8 @@ mise exec -- uv run gev compare \
 
 Kev's published scores are reference baselines, not Gev measurements. The
 correctly labeled reference table and evidence are in [design](design.md).
-No full Gev study score is claimed here.
+Gev's completed study scores and metric-only report snapshots are in
+[Gev v7 results](results/gev-v7.md).
 
 ## Optional Night 2 continuation
 

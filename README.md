@@ -3,8 +3,9 @@
 Gev is a reproducible decision-model experiment using a pointer head over a
 pinned Gemma 3 text backbone. It includes frozen Kev-style data suites,
 controlled augmentation, evaluation/calibration, and an explicit once-only
-locked-test protocol. Gev has no comparable full-study accuracy result; the
-bounded diagnostics documented here are not full-study results.
+locked-test protocol. The completed three-seed v7 study and selected seed's
+locked-test results are in [Gev v7 results](docs/results/gev-v7.md). Bounded
+smoke diagnostics remain separate from the full-study results.
 
 ## Setup and data
 
@@ -65,9 +66,10 @@ mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \
 ```
 
 If the plan is correct and resources are available, run into a new, unique
-output directory by omitting `--dry-run`. The full three-seed study is a
-substantial manual run and has not produced a comparable Gev score in this
-repository. Monitor `runs/<study>/status.json` and per-stage logs under
+output directory by omitting `--dry-run`. The completed v7 study used
+`runs/gev-v7`; its metric-only results are [checked in](docs/results/gev-v7.md).
+A new three-seed study is a substantial manual run. Monitor
+`runs/<study>/status.json` and per-stage logs under
 `runs/<study>/logs/`. For recovery, use the saved seed config and
 `last_good.resume.pt` in a fresh training output directory; never overwrite or
 reuse the interrupted trial. See [`docs/reproduction.md`](docs/reproduction.md)
@@ -79,6 +81,7 @@ for end-to-end commands and evaluation/selection rules.
 mise exec -- uv run pytest -q
 ```
 
-The [documentation index](docs/README.md) links the technical design, research
-evidence, data provenance, reproduction, evaluation, runtime, and installation
-guides. The Kev reference table is research baseline only, not a Gev result.
+The [documentation index](docs/README.md) links the results, technical design,
+research evidence, data provenance, reproduction, evaluation, runtime, and
+installation guides. The Kev reference table is research baseline only, not a
+Gev result.

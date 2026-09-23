@@ -1,5 +1,7 @@
 # Documentation
 
+* [Gev v7 results](results/gev-v7.md) — the completed three-seed study,
+  selected checkpoint, locked-test results, and Kev reference comparison.
 * [Design](design.md) — model architecture, compatibility contracts, training
   invariants, and the boundary between published reference results and Gev
   measurements.
