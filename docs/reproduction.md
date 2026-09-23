@@ -7,7 +7,7 @@ interpret smoke, partial, or one-step pipeline output as a reproduction.
 ## Prerequisites and non-test data
 
 Install the locked environment and authenticate for gated Gemma access as
-described in the [root README](../README.md). `inspect-model` reads the pinned
+described in the [root README](../README.md). `diagnose model` reads the pinned
 config/tokenizer and validates marker rows without fetching model weights. The
 full v7 run requires verified decision-v7 train, calibration, and development
 partitions and transfer-v4 development. Fetch them with `gev data fetch`; verify
@@ -21,13 +21,12 @@ Create a group-preserving child from train and development, then train/evaluate
 with its explicit smoke config:
 
 ```bash
-mise exec -- uv run gev data smoke --out data/smoke --train-records 128 \
+mise exec -- uv run gev data sample --out data/smoke --train-records 128 \
   --dev-records 64 --seed 0
-mise exec -- uv run gev train --config configs/smoke.toml \
-  --suite decision-v7 --split train --data data/smoke \
+mise exec -- uv run gev train configs/smoke.toml --data data/smoke \
   --out runs/smoke --device mps
-mise exec -- uv run gev eval --run runs/smoke --suite decision-v7 \
-  --split development --data data/smoke --config configs/smoke.toml \
+mise exec -- uv run gev evaluate runs/smoke --suite decision-v7 \
+  --split development --data data/smoke \
   --temperature 1 --out runs/smoke-eval-t1 --device mps
 ```
 
@@ -51,9 +50,9 @@ First validate and inspect a dry-run plan. The dry-run checks data identities
 and reports the planned work without loading model weights or test data:
 
 ```bash
-mise exec -- uv run gev validate-config configs/gemma3-1b-v7.toml
-mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \
-  --seeds 0,1,2 --data data --out runs/study-v7 --dry-run
+mise exec -- uv run gev diagnose config configs/gemma3-1b-v7.toml
+mise exec -- uv run gev study plan configs/gemma3-1b-v7.toml \
+  --seeds 0,1,2 --data data
 ```
 
 Before loading model weights, audit actual token lengths for all three seeds,
@@ -62,10 +61,9 @@ each question against the branch cap and includes none-pair variants. Confirm
 every partition reports `overflow_records: 0`:
 
 ```bash
-mise exec -- uv run gev data audit decision-v7 train data/decision-v7/train.jsonl \
-  --config configs/gemma3-1b-v7.toml \
-  --markers runs/reference/model-marker-map.json --augment \
-  --output runs/reference/v7-token-length-audit.json
+mise exec -- uv run gev data audit tokens --data-root data \
+  --config configs/gemma3-1b-v7.toml --markers runs/reference/model-marker-map.json \
+  --augment --out runs/reference/v7-token-length-audit.json
 ```
 
 The verified maximum state-plus-question length for seeds 0, 1, and 2 is
@@ -73,10 +71,10 @@ The verified maximum state-plus-question length for seeds 0, 1, and 2 is
 batch maximum, not to this limit.
 
 Once the plan, token audit, and resources are reviewed, run it using a fresh,
-unique output directory (omit `--dry-run`):
+unique output directory:
 
 ```bash
-mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \
+mise exec -- uv run gev study run configs/gemma3-1b-v7.toml \
   --seeds 0,1,2 --data data --out runs/study-v7
 ```
 
@@ -95,9 +93,8 @@ Resume from the interrupted seed's saved config and `last_good.resume.pt`,
 using the original data and a new training output directory. For example:
 
 ```bash
-mise exec -- uv run gev train \
-  --config runs/study-v7/configs/seed-0.toml \
-  --suite decision-v7 --split train --data data \
+mise exec -- uv run gev train runs/study-v7/configs/seed-0.toml \
+  --data data \
   --resume runs/study-v7/seed-0/last_good.resume.pt \
   --out runs/study-v7-resumed/seed-0
 ```
@@ -147,15 +144,15 @@ initializers are diagnostic only. Fetch the pinned continuation data, then
 inspect the plan before starting any model run:
 
 ```bash
-mise exec -- uv run gev data continuation-fetch --data-root data
-mise exec -- uv run gev continue-training \
-  --config configs/gemma3-1b-night2.toml \
+mise exec -- uv run gev data fetch night2 --data-root data
+mise exec -- uv run gev data prepare night2 --data-root data \
+  --out runs/gev-night2-data
+mise exec -- uv run gev train configs/gemma3-1b-night2.toml \
   --init-from runs/study-v7/seed-0 --data data \
-  --out runs/gev-night2 --dry-run
+  --out runs/gev-night2
 ```
 
-If the initializer lineage and plan are verified, omit `--dry-run` and use a
-new output path to execute. The operation loads weights and starts a fresh
+The operation loads weights and starts a fresh
 optimizer; it does not resume the v7 optimizer state. The intended assembly is
 1,425 pinned Night 2 records followed by 2,000 deterministic train-replay
 records (3,425 total, 429 logical steps). See [continuation](continuation.md)
@@ -170,7 +167,7 @@ trial and full training lineage without loading test examples. A one-step or
 smoke result cannot pass those checks:
 
 ```bash
-mise exec -- uv run gev register-candidate \
+mise exec -- uv run gev locked register \
   --run runs/study-v7/seed-0 --study runs/study-v7/result.json \
   --out runs/selection.json
 ```
@@ -180,7 +177,7 @@ an instruction to select seed 0). Confirm the generated selection and data
 identities before explicitly performing the once-only evaluation:
 
 ```bash
-mise exec -- uv run gev eval-locked --run runs/study-v7/seed-0 \
+mise exec -- uv run gev locked evaluate --run runs/study-v7/seed-0 \
   --selection runs/selection.json --suites decision-v7,transfer-v4 \
   --data data --out runs/locked \
   --ledger runs/locked-ledger.jsonl

@@ -1,9 +1,8 @@
 # Attention execution modes
 
 The default training and evaluation mode is `rows`. Packed execution is an
-explicit ablation (`runtime.execution_mode = "packed"` or `gev eval
---execution packed`) and is recorded in run/checkpoint provenance. Older
-checkpoints are interpreted as row-trained.
+explicit ablation (`runtime.execution_mode = "packed"` or `gev evaluate
+RUN --execution packed`) and is recorded in run/checkpoint provenance.
 
 Packed records use segment zero for shared state and one positive segment per
 question. Full and sliding masks are separate: full attention is logical
@@ -12,7 +11,7 @@ the logical window. Padding is never a real key and padded queries receive a
 finite diagonal sentinel for eager and SDPA stability.
 
 ```bash
-mise exec -- uv run gev check-execution --run runs/study-v7/seed-0 \
+mise exec -- uv run gev diagnose execution --run runs/study-v7/seed-0 \
   --config configs/gemma3-1b-v7.toml --records 8 --device mps \
   --out runs/execution-parity.json
 ```

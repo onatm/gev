@@ -19,18 +19,18 @@ artifact:
 
 ```bash
 mise exec -- uv run hf auth login
-mise exec -- uv run gev inspect-model --config configs/gemma3-1b-v7.toml
+mise exec -- uv run gev diagnose model --config configs/gemma3-1b-v7.toml
 ```
 
-`inspect-model` verifies the pinned tokenizer and five one-token markers; it
-does not download model weights. Fetch only the non-test partitions required by
-the workflow:
+`diagnose model` verifies the pinned tokenizer and five one-token markers
+without downloading weights; add `--probe` for the separate real row-model
+diagnostic. Fetch only the non-test partitions required by the workflow:
 
 ```bash
-mise exec -- uv run gev data fetch decision-v7 train --output data
-mise exec -- uv run gev data fetch decision-v7 calibration --output data
-mise exec -- uv run gev data fetch decision-v7 development --output data
-mise exec -- uv run gev data fetch transfer-v4 development --output data
+mise exec -- uv run gev data fetch decision-v7 train --data-root data
+mise exec -- uv run gev data fetch decision-v7 calibration --data-root data
+mise exec -- uv run gev data fetch decision-v7 development --data-root data
+mise exec -- uv run gev data fetch transfer-v4 development --data-root data
 mise exec -- uv run gev data verify decision-v7 train data/decision-v7/train.jsonl
 ```
 
@@ -44,13 +44,12 @@ The smoke child is a small structural diagnostic, not the full training recipe.
 The default training dtype is fp32; use a device supported by your environment.
 
 ```bash
-mise exec -- uv run gev data smoke --out data/smoke --train-records 128 \
+mise exec -- uv run gev data sample --out data/smoke --train-records 128 \
   --dev-records 64 --seed 0
-mise exec -- uv run gev train --config configs/smoke.toml \
-  --suite decision-v7 --split train --data data/smoke \
+mise exec -- uv run gev train configs/smoke.toml --data data/smoke \
   --out runs/smoke --device mps
-mise exec -- uv run gev eval --run runs/smoke --suite decision-v7 \
-  --split development --data data/smoke --config configs/smoke.toml \
+mise exec -- uv run gev evaluate runs/smoke --suite decision-v7 \
+  --split development --data data/smoke \
   --temperature 1 --out runs/smoke-eval-t1 --device mps
 ```
 
@@ -60,12 +59,12 @@ After fetching/verifying train, calibration, development, and transfer
 development, inspect the plan without loading model weights:
 
 ```bash
-mise exec -- uv run gev experiment --config configs/gemma3-1b-v7.toml \
-  --seeds 0,1,2 --data data --out runs/study-v7 --dry-run
+mise exec -- uv run gev study plan configs/gemma3-1b-v7.toml \
+  --seeds 0,1,2 --data data
 ```
 
 If the plan is correct and resources are available, run into a new, unique
-output directory by omitting `--dry-run`. The full three-seed study is a
+output directory with `study run`. The full three-seed study is a
 substantial manual run and has not produced a comparable Gev score in this
 repository. Monitor `runs/<study>/status.json` and per-stage logs under
 `runs/<study>/logs/`. For recovery, use the saved seed config and
@@ -73,12 +72,24 @@ repository. Monitor `runs/<study>/status.json` and per-stage logs under
 reuse the interrupted trial. See [`docs/reproduction.md`](docs/reproduction.md)
 for end-to-end commands and evaluation/selection rules.
 
+```bash
+mise exec -- uv run gev study run configs/gemma3-1b-v7.toml \
+  --seeds 0,1,2 --data data --out runs/study-v7
+```
+
 ## Checks and further reading
+
+The full default test suite includes pinned-data golden checks and intentionally
+requires the verified, non-test partitions in `data/`: decision-v7 train,
+calibration, and development, plus transfer-v4 development. Fetch and verify
+those partitions using the commands above before running the suite. Tests do
+not fetch data; the held-out test partition must not be fetched for them.
 
 ```bash
 mise exec -- uv run pytest -q
 ```
 
-The [documentation index](docs/README.md) links the technical design, research
-evidence, data provenance, reproduction, evaluation, runtime, and installation
-guides. The Kev reference table is research baseline only, not a Gev result.
+Start with the [architecture index](docs/ARCHITECTURE.md), then use the
+[documentation index](docs/README.md) for technical design, research evidence,
+data provenance, reproduction, evaluation, runtime, and installation guides.
+The Kev reference table is research baseline only, not a Gev result.

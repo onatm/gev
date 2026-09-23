@@ -15,6 +15,11 @@ the current working directory.  The downloaded JSONL data is intentionally
 not part of the wheel.  Pass its location to data and evaluation commands.
 
 The repository's `configs/` files are experiment templates rather than package
-defaults.  Installed commands that run or inspect a model require an explicit
-`--config /path/to/config.toml`; `gev --help`, `gev doctor`, and manifest
-loading do not require a checkout or a model download.
+defaults. `gev train CONFIG` and `gev study plan|run CONFIG` take an explicit
+config path; `gev evaluate RUN` can use the resolved config recorded with that
+checkpoint. `gev diagnose config CONFIG` validates a config and its registered
+family/backend without downloading a model. Diagnostic commands accept a
+config when they need one. `gev --help`, `gev diagnose environment`, and
+manifest loading do not require a checkout or model download. See the
+[architecture index](ARCHITECTURE.md) for current runtime support and the
+future qualification roadmap; planned backends are not currently available.

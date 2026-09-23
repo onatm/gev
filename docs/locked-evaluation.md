@@ -1,6 +1,6 @@
 # Locked evaluation
 
-`gev register-candidate` consumes the study result interface: `promotion`
+`gev locked register` consumes the study result interface: `promotion`
 selects a seed from the matching `trials[]` entry, whose `path`, eligibility,
 completion, and calibration/development/transfer reports are verified. The
 `--run` checkpoint must be that selected trial, not an unrelated run. The
@@ -9,10 +9,11 @@ checkpoint must prove either the complete v7 source (12,576 source records,
 Night 2 plus 2,000-record replay continuation (3,425 records, 429 steps) from
 a verified full-v7 ancestor; `complete` alone and diagnostic smoke
 initializers are insufficient. The record stores study and checkpoint
-provenance, stable weights identity, any development temperature fit, and
+provenance, stable weights identity (family/backend, complete pinned base and
+tokenizer identity, markers, and tensor digests), any development temperature fit, and
 pinned suite/test-file identities; it does not load test examples.
 
-`gev eval-locked` validates that record against the actual checkpoint, checks
+`gev locked evaluate` validates that record against the actual checkpoint, checks
 all requested suites and the output path, then reserves one ledger key per
 `(stable weights fingerprint, suite manifest)` while holding one ledger lock.
 Every suite is reserved before any test loader is called.  A failed attempt is
@@ -32,3 +33,9 @@ performed. Each suite writes predictions, rows, and its report atomically,
 with source, suite, model, and row fingerprints plus complete question
 coverage. Test data is inaccessible through the normal evaluation split loader
 and may only be fetched by the reserved locked path.
+
+If a requested test JSONL is missing locally, `gev locked evaluate` fetches the
+pinned test file and verifies its manifest hash from inside the reserved loader
+callback. All requested ledger keys are reserved before that callback is
+invoked. Normal `gev data fetch`, `verify`, `audit`, and `evaluate` commands do
+not expose test splits or an override flag.

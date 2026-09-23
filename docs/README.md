@@ -1,5 +1,8 @@
 # Documentation
 
+* [Architecture](ARCHITECTURE.md) — Python package layout, system topology,
+  ownership, extension boundaries, runtime status, provenance, and held-out
+  data boundary.
 * [Design](design.md) — model architecture, compatibility contracts, training
   invariants, and the boundary between published reference results and Gev
   measurements.

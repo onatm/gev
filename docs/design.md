@@ -29,12 +29,44 @@ result is claimed.
 
 ## Configuration, rendering, and markers
 
-TOML has separate `[model]`, `[training]`, and `[runtime]` tables plus an
-experiment ID. Unknown/missing keys, invalid types/ranges/modes, and unpinned
-model revisions fail before output creation. Artifacts record model/tokenizer
+TOML separates protocol/study identity, model family, backend, training policy,
+and runtime into `[protocol]`, `[experiment]`, `[model]`, `[backend]`,
+`[training]`, and `[runtime]` tables. The current resolved composition is
+`gemma3_text` on `torch`; unsupported family/backend capabilities fail before
+tokenizer/model downloads, and unavailable explicit accelerators fail before
+model weights are loaded. The scientific recipe hash excludes backend and
+device selection as well as replicate seed, output location, save interval, and
+max-step limits; those execution and operational choices remain in resolved
+provenance. Backend is still part of immutable checkpoint identity, while
+precision and execution mode remain scientific recipe choices. Provenance is
+written with plans, training results, and checkpoints. Artifacts also record model/tokenizer
 revisions, delimiter/BOS contract, context/execution/dtype, LoRA targets,
 suite/augmentation hashes, and temperature policy. Credentials use the
 Hugging Face chain and are never copied to config or output.
+
+Inference checkpoints use the independently versioned
+`gev.inference-checkpoint` `manifest.json` v1 contract. Resume snapshots use
+their own independently versioned `gev.logical-resume` v1 contract; the two
+artifact versions evolve separately. The inference manifest identity section pins
+family/backend, base and tokenizer revisions, markers, protocol, scientific
+recipe, and model contract; lineage, training, and execution metadata are
+separate sections. Adapter and pointer descriptors record filenames, SHA-256,
+and tensor shapes. One validated manifest
+reader checks descriptor bytes before any frozen base load. The stable model
+fingerprint uses family/backend, pinned base name/type/revision, tokenizer
+revision/digest, markers, and both tensor hashes; calibration is mutable
+manifest data and does not alter that fingerprint. The Torch backend owns
+safetensors loading and writing; flat inference artifacts are unsupported.
+
+The family runtime supplies its tokenizer, markers, and Python-record encoder;
+the backend protocol owns model construction, prediction, checkpoint I/O, and
+training sessions. Torch backend modules contain tensors, autograd, optimizer
+state, RNG, and device operations; deterministic logical batching, augmentation,
+and the equal-mean question/variant weighting policy remain backend-neutral.
+Profiling, precision, and execution-parity capabilities are optional backend
+features; a backend need not provide diagnostics to register for train/inference.
+See the [architecture index](ARCHITECTURE.md) for extension boundaries and the
+explicit future runtime qualification roadmap.
 
 Kev rendering is `[state]`, followed by each question `[q] instruction [opt]
 option [/opt] ... [decide]`. Gev uses five existing Gemma rows, not Qwen FIM
