@@ -1,116 +1,81 @@
-# Gev architecture
+# Architecture
 
-Gev is a local, reproducible experiment pipeline for decision models. This is
-the topology and ownership index; component contracts, scientific rationale,
-and workflows are documented in the linked guides. Gev currently has no
-comparable full-study result.
+Gev is a local, reproducible experiment pipeline. This overview describes its
+flow, ownership boundaries, and scientific trust rules; the checked-in configs,
+locks, and manifests remain the source of truth for pinned identities.
 
-## Boundaries and principles
-
-- **Protocol is stable; execution is replaceable.** `protocol`, data lineage,
-  and scientific training policy define the experiment. Device, backend,
-  checkpoint cadence, and run paths are explicit execution choices and appear
-  in provenance without silently changing the scientific recipe.
-- **Resolve before loading.** A registered model-family × backend pair and its
-  capabilities are validated before tokenizer or weight downloads. Unsupported
-  pairs fail early.
-- **Keep held-out data behind a trust boundary.** Ordinary data and evaluation
-  paths only load train/calibration/development partitions. Locked evaluation
-  reserves every requested suite in its ledger before fetching or loading test
-  data.
-
-## System topology and ownership
+## Flow and boundaries
 
 ```text
-configuration + verified data
-             │
-             ▼
-       resolved config ─── registry ─── family runtime × backend
-             │                              │
-             ▼                              ▼
+config + verified non-test data
+              │
+              ▼
+      resolved configuration ── model-family × backend registry
+              │                              │
+              ▼                              ▼
  commands → application stages → training/evaluation artifacts
-    │                                      │
-    └── study planner/runner               └── provenance/checkpoints
-                                               │
-                           locked registration → reservation → test evaluation
+    │                              │
+    └── study planning/runs        └── checkpoints + provenance
+                                             │
+                   candidate registration → reservation → test evaluation
 ```
 
-## Python package layout
+- **Configuration and domain:** `configuration/` parses strict TOML and
+  resolves model/backend choices. `domain/` holds backend-neutral contracts,
+  request projection, representations, and tokenizer-independent encoding.
+- **Data and lineage:** `data/` owns pinned suite manifests, acquisition,
+  verification, and partition rules. Access verifies bytes and lineage before
+  exposing rows. `artifacts/` validates checkpoint manifests, fingerprints, and
+  bytes.
+- **Model and training:** `models/` defines family contracts and the registry;
+  `training/` owns backend-neutral policy and scheduling. `backends/torch/`
+  owns Torch model construction, tensor prediction, optimizer/RNG/device
+  behavior, and checkpoint I/O. Family runtimes provide tokenizer, markers,
+  and record encoding, not device tensors.
+- **Orchestration and CLI:** `application/` composes data, configuration, model,
+  and backend operations into stages. `study/` plans and orchestrates multi-seed
+  runs. `commands/` is the CLI boundary; [`parser.py`](../src/gev/commands/parser.py)
+  is its source of truth. `evaluation/locked.py` owns candidate checks,
+  reservation, and the only held-out test acquisition/loading route.
+- **Supporting code:** `diagnostics/` contains environment, model, precision,
+  profiling, and execution diagnostics. `infrastructure/` handles system TLS
+  setup and immutable-resource lookup; `resources/` contains packaged manifests.
+  The `gev` package root is an executable boundary, not an implementation layer.
 
-The `gev` package root is an executable boundary only: `__init__.py`,
-`__main__.py`, and the thin `cli.py`, alongside `resources/`. Implementation
-modules live in their owning packages:
+## Runtime and execution policy
 
-- **`configuration/`** parses strict TOML and resolves model/backend selection;
-  **`domain/`** owns transport-neutral contracts, request projection,
-  representation/materialization, and tokenizer-independent encoding.
-- **`study/`** plans and orchestrates multi-seed runs, generated child configs,
-  and isolated child processes; **`artifacts/`** validates checkpoint manifests,
-  fingerprints, and bytes. Tensor checkpoint I/O remains in the backend.
-- **`diagnostics/`** provides environment, model, precision, profiling, and
-  representative-execution diagnostics; **`infrastructure/`** owns system TLS
-  setup and packaged immutable-resource lookup. Resources remain under
-  `gev/resources/` and are resolved through `importlib.resources`.
-- **`data/`** owns pinned suite manifests, acquisition/verification, and
-  partition-access rules. Application access verifies bytes and lineage before
-  exposing rows.
-- **`models/`** defines model-family contracts and registry; **`training/`**
-  owns backend-neutral training policy and scheduling.
-- **`backends/torch/`** owns Torch model construction, tensor prediction,
-  optimizer/RNG/device behavior, checkpoint I/O, and supported diagnostics.
-- **`application/`** composes verified data, resolved configuration, family and
-  backend operations into train, evaluation, and locked-evaluation stages;
-  **`commands/`** is the CLI boundary. `study` is the porcelain workflow;
-  `train`, `evaluate`, `data`, `diagnose`, `calibrate`, and `compare` expose
-  focused operations. `evaluation/locked` owns candidate checks, once-only
-  reservation, and the only route to held-out test acquisition/loading.
+The implemented runtime is Gemma 3 text on Torch, with CPU/MPS support for
+applicable operations. The pinned v7 and Night 2 recipes specify fp32. MPS BF16
+is not qualified: its measured probability delta of `0.0505` exceeds the `0.02`
+acceptance threshold. Training and evaluation default to `rows`; `packed` is an
+optional ablation, not the default recipe. Older checkpoints are interpreted
+as row-trained. Precision and execution mode belong to the scientific recipe;
+device and operational controls are recorded separately in provenance.
 
-Torch-specific implementation imports use `backends/torch/` directly; no
-compatibility shims are retained under `models/`, `training/`, or
-`evaluation/`. A family runtime supplies tokenizer, markers, and record
-encoding; it does not own device tensors.
+## Data, provenance, and held-out access
 
-## Extension model and runtime status
+Pinned scientific and data identity lives in
+[`configs/gemma3-1b-v7.toml`](../configs/gemma3-1b-v7.toml),
+[`configs/gemma3-1b-night2.toml`](../configs/gemma3-1b-night2.toml),
+[`kev.lock.json`](../kev.lock.json), [`models.lock.json`](../models.lock.json),
+the manifests under [`src/gev/resources/suites/`](../src/gev/resources/suites/),
+and [`src/gev/resources/night2/manifest.json`](../src/gev/resources/night2/manifest.json).
+Run artifacts record the resolved recipe, data lineage, model/tokenizer identity,
+and execution details; hashes and large provenance tables are kept with those
+canonical files rather than repeated here.
 
-The registry maps family IDs to a family specification/runtime, and backend IDs
-to implementations that declare supported families, architectures, and
-capabilities. A composition is usable only when the backend satisfies the
-family's required capabilities and required operations. To add a family, add a
-specification and tokenizer/marker/encoder runtime, then register it; to add a
-backend, implement the backend protocol and declare supported pairings and
-capabilities. Add the registration and focused contract tests. Neither requires
-editing application-stage policy or CLI orchestration. Optional profiling,
-precision, and execution diagnostics are capability-gated.
+Ordinary fetch, verification, and evaluation paths are restricted to train,
+calibration, and development partitions. Candidate registration validates a
+complete eligible study and its selected checkpoint without reading test rows;
+smoke or partial runs are not eligible. For locked evaluation, every requested
+suite is reserved in the ledger before the test fetch/load path is invoked.
+Failed reservations are recorded and cannot be retried for the same identity.
+This once-only reservation is the held-out trust boundary.
 
-The currently implemented and qualified runtime is Gemma 3 text on Torch, with
-CPU/MPS support for the applicable operations. Mac use is supported by that
-current Torch/MPS path. **Future qualification roadmap only (not implemented):**
-H100/CUDA, then Gemma 4 E4B base, then MLX. These are planned phases, not current
-backend/model capabilities or measured results.
+## Recovery is not warm-start
 
-## Provenance, resume, and held-out access
-
-Every run records the pinned base/tokenizer identity, family/backend, protocol,
-scientific recipe digest, data/manifests, and execution controls. A fresh
-warm-start initializes model weights but starts a new optimizer and schedule;
-exact resume restores optimizer, scheduler, cursor, RNG, and augmentation state
-from a compatible snapshot. The two operations are deliberately distinct.
-
-Before-test reservation is mandatory: candidate registration validates study
-selection and completion without reading test rows; locked evaluation atomically
-reserves the model/suite identities before invoking its test fetch/load path.
-Reservation failures remain recorded and are not retryable under the same key.
-
-## Related documentation
-
-- [Technical design and research record](design.md) — model, protocol, artifact,
-  and scientific contracts.
-- [Reproduction workflow](reproduction.md) and [installation](install.md) —
-  setup, commands, study execution, and recovery.
-- [Data provenance](data-provenance.md) and [locked evaluation](locked-evaluation.md)
-  — pinned data and the held-out trust boundary.
-- [Resume](resume.md) and [continuation](continuation.md) — exact resume versus
-  fresh-optimizer warm-start.
-- [Runtime execution](attention.md), [precision](precision.md), and
-  [evaluation](evaluation.md) — qualification and measurement procedures.
-- [Documentation index](README.md).
+Exact `--resume` requires a compatible snapshot and restores optimizer,
+scheduler, progress cursor, RNG, and augmentation state. It continues the same
+training identity and must write to a fresh output directory. `--init-from`
+loads model weights into a new run with a fresh optimizer and schedule; it is a
+warm-start, not a continuation of optimizer state.
