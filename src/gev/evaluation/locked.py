@@ -72,33 +72,29 @@ def _checkpoint(path: str | Path) -> Path:
 
 
 def _actual_checkpoint_fingerprint(checkpoint: Path) -> tuple[str, dict]:
-    metadata = json.loads((checkpoint / "metadata.json").read_text(encoding="utf-8"))
-    for name, field in (("adapter_model.safetensors", "adapter_sha256"),
-                        ("pointer.safetensors", "pointer_sha256")):
-        file = checkpoint / name
-        if not file.exists() or metadata.get(field) != _sha(file):
-            raise ValueError(f"checkpoint {name} hash does not match metadata")
-    from ..checkpoint import checkpoint_fingerprint
+    from ..artifacts.checkpoint_identity import checkpoint_fingerprint, read_checkpoint_manifest
+    metadata = read_checkpoint_manifest(checkpoint)
     return checkpoint_fingerprint(checkpoint), metadata
 
 
 def _training_lineage(metadata: dict) -> str:
     """Return the accepted full-training lineage, never trusting ``complete`` alone."""
-    training = metadata.get("training", {})
-    config = metadata.get("config", {})
+    lineage = metadata["lineage"]
+    training = metadata["training"].get("metrics", {})
+    config = metadata["training"].get("config", {})
     recipe = config.get("training", {})
     full_recipe = (config.get("experiment_id") == "gemma3-1b-v7" and
                    recipe.get("epochs") == 2 and recipe.get("logical_batch") == 8 and
                    recipe.get("context_length") == 384 and recipe.get("p_none_pair", .25) == .25 and
                    recipe.get("seed") in {0, 1, 2})
-    full_v7 = (metadata.get("source_sha256") == V7_TRAIN_SHA256 and
-               metadata.get("manifest_sha256") == V7_MANIFEST_SHA256 and
+    full_v7 = (lineage.get("source_sha256") == V7_TRAIN_SHA256 and
+               lineage.get("manifest_sha256") == V7_MANIFEST_SHA256 and
                 training.get("complete") is True and training.get("logical_steps") == FULL_V7_STEPS and
                 training.get("processed_records") == FULL_V7_PROCESSED_RECORDS and
                  training.get("source_count") == FULL_V7_SOURCE_RECORDS and full_recipe and
-                 not metadata.get("diagnostic_smoke_init") and not metadata.get("smoke_only") and
-                 not metadata.get("continuation", {}).get("diagnostic_smoke_init"))
-    continuation = metadata.get("continuation", {})
+                  not lineage.get("diagnostic_smoke_init") and not lineage.get("smoke_only") and
+                  not lineage.get("continuation", {}).get("diagnostic_smoke_init"))
+    continuation = lineage.get("continuation", {})
     prepared = continuation.get("prepared", {})
     full_night2 = (config.get("experiment_id") == "gemma3-1b-night2" and
                     training.get("complete") is True and prepared.get("records") == NIGHT2_RECORDS and
@@ -110,7 +106,7 @@ def _training_lineage(metadata: dict) -> str:
                     continuation.get("init_checkpoint_fingerprint") and
                     continuation.get("initializer_kind") == "full-v7" and
                     continuation.get("diagnostic_smoke_init") is False and
-                    not metadata.get("diagnostic_smoke_init") and not metadata.get("smoke_only"))
+                    not lineage.get("diagnostic_smoke_init") and not lineage.get("smoke_only"))
     if full_v7:
         return "full-v7"
     if full_night2:
@@ -122,7 +118,7 @@ def _temperature(selection: dict, checkpoint_meta: dict | None) -> float:
     value = selection.get("temperature", 1.0)
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
         raise ValueError("selection temperature must be finite and positive")
-    stored = (checkpoint_meta or {}).get("temperature", 1.0)
+    stored = (checkpoint_meta or {}).get("calibration", {}).get("temperature", 1.0)
     if not isinstance(stored, (int, float)) or not math.isfinite(stored) or stored <= 0 or float(stored) != float(value):
         raise ValueError("selection temperature does not match checkpoint")
     fit = selection.get("temperature_fit")
@@ -153,12 +149,13 @@ def _validate_selection(selection: dict, suites: tuple[str, ...], actual_fingerp
     if actual_fingerprint is not None and selection["model_fingerprint"] != actual_fingerprint:
         raise ValueError("selection model fingerprint does not match checkpoint weights")
     if checkpoint_meta is not None:
-        continuation = checkpoint_meta.get("continuation", {})
-        if (checkpoint_meta.get("diagnostic_smoke_init") or checkpoint_meta.get("smoke_only") or
+        lineage = checkpoint_meta["lineage"]
+        continuation = lineage.get("continuation", {})
+        if (lineage.get("diagnostic_smoke_init") or lineage.get("smoke_only") or
                 continuation.get("diagnostic_smoke_init")):
             # A continuation may carry this marker, but only its verified
             # full-night2 lineage can make it acceptable.
-            if checkpoint_meta.get("continuation", {}).get("prepared", {}).get("records") != NIGHT2_RECORDS:
+            if continuation.get("prepared", {}).get("records") != NIGHT2_RECORDS:
                 raise ValueError("smoke checkpoints cannot be evaluated as locked candidates")
         _training_lineage(checkpoint_meta)
     selected_suites = selection.get("suites")
@@ -218,9 +215,6 @@ def run_locked(*, selection: str | Path, suites: tuple[str, ...], data_root: str
         recorded_checkpoint = selected.get("checkpoint", {}).get("path")
         if recorded_checkpoint and Path(recorded_checkpoint).resolve() != checkpoint.resolve():
             raise ValueError("selection is registered for a different checkpoint")
-        recorded_metadata = selected.get("checkpoint", {}).get("metadata_sha256")
-        if recorded_metadata and recorded_metadata != _sha(checkpoint / "metadata.json"):
-            raise ValueError("selection checkpoint metadata does not match checkpoint")
     elif actual is None or meta is None:
         raise ValueError("locked evaluation requires an actual checkpoint or verified model metadata and fingerprint")
     study = selected.get("study")
@@ -321,21 +315,23 @@ def register_candidate(*, run: str | Path, study: str | Path, out: str | Path) -
                 not report.get("mechanism_checks", {}).get("passed", False):
             raise ValueError(f"selected trial has incomplete {name} report")
     fingerprint, _ = _actual_checkpoint_fingerprint(checkpoint)
-    training = metadata.get("training", {})
+    training = metadata["training"].get("metrics", {})
+    lineage_info = metadata["lineage"]
+    calibration = metadata["calibration"]
     selection = {"protocol": "locked-eval-v7", "model_fingerprint": fingerprint,
-                 "temperature": float(metadata.get("temperature", 1.0)),
-                 "checkpoint": {"path": str(checkpoint), "metadata_sha256": _sha(checkpoint / "metadata.json")},
+                 "temperature": float(calibration.get("temperature", 1.0)),
+                 "checkpoint": {"path": str(checkpoint)},
                  "study": {"path": str(study_path), "sha256": _sha(study_path), "selected_seed": selected_seed},
-                 "training": {"source_sha256": training.get("source_sha256") or metadata.get("source_sha256"),
-                               "manifest_sha256": metadata.get("manifest_sha256"),
-                               "complete": metadata.get("training", {}).get("complete"),
-                               "lineage": lineage}, "suites": {}}
+                 "training": {"source_sha256": lineage_info.get("source_sha256"),
+                                "manifest_sha256": lineage_info.get("manifest_sha256"),
+                                "complete": training.get("complete"),
+                                "lineage": lineage}, "suites": {}}
     for suite in ("decision-v7", "transfer-v4"):
         manifest_hash, manifest = _manifest_info(suite)
         selection["suites"][suite] = {"manifest_sha256": manifest_hash,
                                        "data_sha256": manifest["files"]["test.jsonl"]["sha256"]}
-    if metadata.get("temperature_fit"):
-        selection["temperature_fit"] = metadata["temperature_fit"]
+    if calibration.get("fit"):
+        selection["temperature_fit"] = calibration["fit"]
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return selection

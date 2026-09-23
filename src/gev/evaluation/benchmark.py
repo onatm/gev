@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..api_request import api_request
+from ..domain.api_request import api_request
 from .metrics import EPSILON, grouped_metrics, metrics, raw_row, scored_rows, unknowable_report
 
 

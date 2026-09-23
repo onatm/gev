@@ -3,9 +3,8 @@ from __future__ import annotations
 import copy, random
 from dataclasses import dataclass
 from ..data.augmentation import augment, item_rng, none_pair
-from ..materialize import materialize
-from ..tokenization import encode
-from ..tokenization import rows_of
+from ..domain.materialize import materialize
+from ..domain.tokenization import encode, rows_of
 
 @dataclass(frozen=True)
 class Variant:
@@ -25,7 +24,9 @@ def shuffled_requests(requests: list[dict], seed: int) -> list[dict]:
     random.Random(seed).shuffle(result)
     return result
 
-def variants_for_request(request: dict, *, seed: int, epoch: int, tokenizer, markers, caps: tuple[int, int, int], p_none=.1, p_none_distract=.12, p_distract=.15, p_none_pair=0.) -> list[Variant]:
+def variants_for_request(request: dict, *, seed: int, epoch: int, tokenizer, markers,
+                         caps: tuple[int, int, int], p_none=.1, p_none_distract=.12,
+                         p_distract=.15, p_none_pair=0., encoder=None) -> list[Variant]:
     identifier = request.get("_meta", {}).get("id", request.get("id", ""))
     rng = item_rng(seed, epoch, identifier)
     altered = augment(request, rng, p_none, p_none_distract, p_distract)
@@ -35,7 +36,9 @@ def variants_for_request(request: dict, *, seed: int, epoch: int, tokenizer, mar
     result = []
     for value, kind in requests:
         rec = materialize(value)
-        enc = encode(tokenizer, rec, markers, state_cap=caps[0], branch_cap=caps[1], packed_cap=caps[2])
+        encode_record = encode if encoder is None else encoder
+        enc = encode_record(tokenizer, rec, markers, state_cap=caps[0],
+                            branch_cap=caps[1], packed_cap=caps[2])
         result.append(Variant(rec, enc, identifier, request.get("_meta", {}).get("source", "unknown"), kind))
     return result
 

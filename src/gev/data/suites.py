@@ -10,12 +10,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ..network import use_system_ssl
-from ..config import load_config
-from ..hashhelper import sha256
-from ..materialize import materialize
-from ..pathlookup import reference_bytes
-from ..tokenization import MarkerMap, encode, rows_of
+from ..infrastructure.network import use_system_ssl
+from ..configuration.config import load_config
+from ..artifacts.hashing import sha256
+from ..domain.materialize import materialize
+from ..infrastructure.pathlookup import reference_bytes
+from ..domain.tokenization import rows_of
 
 KEV_SHA = "08ab0b87d27cb5577a3b371ad7ed4e4686b0502b"
 HF_REVISION = "a88f56db5341397299137cb68775c2ea6e3f68cb"
@@ -106,7 +106,7 @@ def load_split(path: Path, suite: str, split: str, manifest: dict[str, Any] | No
     if split not in KNOWN_SPLITS:
         raise SuiteError(f"unknown split: {split}")
     if split == "test" and not allow_test:
-        raise SuiteError("test requires explicit --allow-test")
+        raise SuiteError("test data is restricted to the locked evaluation path")
     manifest = manifest or load_manifest(suite)
     if not manifest.get("smoke_only"):
         _validate_manifest_identity(suite, manifest)
@@ -137,7 +137,7 @@ def _validate_request(row: dict[str, Any]) -> None:
             raise SuiteError("noul criteria must be an object")
         if "label" not in question:
             raise SuiteError("question is missing label")
-        from ..representation import question_keys, validate_label, validate_target
+        from ..domain.representation import question_keys, validate_label, validate_target
         keys = question_keys(kind, criteria or ({} if kind == "noul" else []))
         validate_label(question, keys)
         if question.get("target") is not None:
@@ -197,10 +197,12 @@ def fetch_manifest(name: str, destination: Path) -> dict[str, Any]:
     return json.loads(data)
 
 
-def fetch_file(split: str, suite: str, destination: Path, manifest: dict[str, Any], *, allow_test=False) -> dict[str, Any]:
+def _fetch_file(split: str, suite: str, destination: Path, manifest: dict[str, Any], *,
+                locked_test: bool) -> dict[str, Any]:
     if suite not in KNOWN_SUITES:
         raise SuiteError(f"unknown suite: {suite}")
-    if split == "test" and not allow_test: raise SuiteError("test requires explicit --allow-test")
+    if split == "test" and not locked_test:
+        raise SuiteError("test data is restricted to the locked evaluation path")
     _validate_manifest_identity(suite, manifest)
     info = _file_info(manifest, split)
     path = f"{'v7/decision-v7' if suite == 'decision-v7' else 'v4/transfer-v4'}/{split}.jsonl"
@@ -211,10 +213,22 @@ def fetch_file(split: str, suite: str, destination: Path, manifest: dict[str, An
     return result
 
 
+def fetch_file(split: str, suite: str, destination: Path,
+               manifest: dict[str, Any]) -> dict[str, Any]:
+    """Fetch a non-test partition; test has no public fetch flag."""
+    return _fetch_file(split, suite, destination, manifest, locked_test=False)
+
+
+def _fetch_locked_test_file(suite: str, destination: Path,
+                            manifest: dict[str, Any]) -> dict[str, Any]:
+    """Private test fetch used only from the post-reservation locked callback."""
+    return _fetch_file("test", suite, destination, manifest, locked_test=True)
+
+
 def audit(path: Path, manifest: dict[str, Any], split: str, *, allow_test: bool = False, suite: str | None = None) -> dict[str, Any]:
     if split not in KNOWN_SPLITS:
         raise SuiteError(f"unknown split: {split}")
-    if split == "test" and not allow_test: raise SuiteError("test requires explicit --allow-test")
+    if split == "test" and not allow_test: raise SuiteError("test data is restricted to the locked evaluation path")
     _validate_manifest_identity(suite or ("decision-v7" if "train.jsonl" in manifest.get("files", {}) and manifest["files"]["train.jsonl"].get("records", 0) else "transfer-v4"), manifest)
     info = _file_info(manifest, split)
     result = verify_jsonl(path, info["sha256"], info["records"], info["questions"])
@@ -266,7 +280,7 @@ def audit(path: Path, manifest: dict[str, Any], split: str, *, allow_test: bool 
         for q in row.get("questions", {}).values():
             result["types"][q.get("type", "unknown")] = result["types"].get(q.get("type", "unknown"), 0) + 1
             try:
-                from ..representation import question_keys, validate_label
+                from ..domain.representation import question_keys, validate_label
                 validate_label(q, question_keys(q["type"], q.get("criteria") or ({} if q["type"] == "noul" else [])))
             except (KeyError, ValueError) as exc:
                 result["validation_errors"].append(str(exc))
@@ -277,7 +291,7 @@ def audit(path: Path, manifest: dict[str, Any], split: str, *, allow_test: bool 
 
 def verify(path: Path, manifest: dict[str, Any], split: str, *, allow_test: bool = False, suite: str | None = None) -> dict[str, Any]:
     """Verify a downloaded split; unlike audit this is deliberately no tokenizer work."""
-    if split == "test" and not allow_test: raise SuiteError("test requires explicit --allow-test")
+    if split == "test" and not allow_test: raise SuiteError("test data is restricted to the locked evaluation path")
     suite = suite or ("decision-v7" if "train.jsonl" in manifest.get("files", {}) and manifest["files"]["train.jsonl"].get("records", 0) else "transfer-v4")
     _validate_manifest_identity(suite, manifest)
     info = _file_info(manifest, split)
@@ -353,12 +367,13 @@ def token_length_audit(data_root: Path, config_path: str, marker_path: Path,
                        seeds: tuple[int, ...] | None = None,
                        output: Path = Path("runs/reference/token-length-audit.json")) -> dict[str, Any]:
     """Measure actual tokenizer lengths without changing or truncating source bytes."""
-    from transformers import AutoTokenizer
     from ..training.batching import variants_for_request
 
     config = load_config(config_path)
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name, revision=config.model.revision)
-    markers = MarkerMap.load(marker_path, tokenizer)
+    from ..configuration.resolved import resolve_experiment_config
+    resolved = resolve_experiment_config(config)
+    tokenizer = resolved.load_tokenizer()
+    markers = resolved.load_markers(tokenizer, artifact_path=marker_path)
     caps = {"state": config.training.state_cap, "branch": config.training.branch_cap,
             "packed": config.training.packed_cap}
     epochs = config.training.epochs if epochs is None else epochs
@@ -381,13 +396,15 @@ def token_length_audit(data_root: Path, config_path: str, marker_path: Path,
         for row in rows:
             ident = row.get("_meta", {}).get("id", "unknown")
             if training_seed is None:
-                encodings = [("unaugmented", encode(tokenizer, materialize(row), markers,
-                              state_cap=10**9, branch_cap=10**9, packed_cap=10**9))]
+                encodings = [("unaugmented", resolved.encode_record(
+                    tokenizer, materialize(row), markers, state_cap=10**9,
+                    branch_cap=10**9, packed_cap=10**9))]
             else:
                 variants = variants_for_request(row, seed=training_seed, epoch=epoch,
                             tokenizer=tokenizer, markers=markers, caps=(10**9, 10**9, 10**9),
                             p_none=config.training.p_none, p_none_distract=config.training.p_none_distract,
-                            p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair)
+                            p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair,
+                            encoder=resolved.encode_record)
                 encodings = [(v.variant, v.encoding) for v in variants]
             for kind_name, encoded in encodings:
                 _, _, questions = rows_of(encoded)
