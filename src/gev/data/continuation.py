@@ -6,6 +6,7 @@ from the verified v7 train split.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import random
@@ -14,7 +15,7 @@ from typing import Any
 import urllib.request
 
 from .suites import atomic_write, load_manifest, load_split, REQUIRED_FILE_HASHES
-from ..pathlookup import reference_bytes
+from ..infrastructure.pathlookup import reference_bytes
 
 KEV_REVISION = "08ab0b87d27cb5577a3b371ad7ed4e4686b0502b"
 NIGHT2_SEED = "night2-20260920"  # artifact-generation seed; not the training seed
@@ -80,7 +81,7 @@ def build_continuation(data_root: str | Path = "data", *, out: str | Path | None
     night2 = root / "night2" / "dates_unknowable.jsonl"
     manifest_path = root / "night2" / "manifest.json"
     if not night2.exists() or not manifest_path.exists():
-        raise ValueError("frozen night2 artifact is missing; run data continuation-fetch first")
+        raise ValueError("frozen night2 artifact is missing; run `gev data fetch night2` first")
     night2_rows = _read_frozen_night2(night2)
     night2_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if night2_manifest.get("seed") != NIGHT2_SEED:
@@ -149,32 +150,38 @@ def load_prepared(path: str | Path, *, data_root: str | Path | None = None,
 def validate_init_metadata(checkpoint: str | Path, config) -> dict[str, Any]:
     """Check the warm-start identity without loading backbone or adapter bytes."""
     directory = Path(checkpoint)
-    metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-    if metadata.get("model_name") != config.model.name or metadata.get("model_revision") != config.model.revision:
+    from ..artifacts.checkpoint_identity import checkpoint_fingerprint, read_checkpoint_manifest
+    manifest = read_checkpoint_manifest(directory)
+    identity, lineage = manifest["identity"], manifest["lineage"]
+    base, markers, contract = identity["base"], identity["markers"], identity["model_contract"]
+    if identity.get("family") != "gemma3_text" or identity.get("backend") != "torch":
+        raise ValueError("continuation init checkpoint family/backend mismatch")
+    expected_protocol = dataclasses.asdict(config.protocol) if hasattr(config, "protocol") else {
+        "id": "kev-decision-v7", "version": 1}
+    if identity.get("protocol") != expected_protocol:
+        raise ValueError("continuation init checkpoint protocol mismatch")
+    if base.get("name") != config.model.name or base.get("revision") != config.model.revision:
         raise ValueError("continuation init checkpoint model identity mismatch")
-    if metadata.get("base_model_type") != "gemma3_text" or metadata.get("lora") != LORA_CONTRACT:
+    if (base.get("type") != "gemma3_text" or identity.get("backend") != "torch"
+            or contract.get("lora") != LORA_CONTRACT):
         raise ValueError("continuation init checkpoint is not the Gemma LoRA contract")
-    if metadata.get("head_width") != 256:
+    if contract.get("head_width") != 256:
         raise ValueError("continuation init pointer head width mismatch")
-    if "qwen" in str(metadata.get("model_name", "")).lower():
+    if "qwen" in str(base.get("name", "")).lower():
         raise ValueError("Qwen checkpoints are not valid Gev continuation initializers")
-    for field in ("adapter_sha256", "pointer_sha256", "marker_ids", "marker_strings", "tokenizer_revision"):
-        if not metadata.get(field):
-            raise ValueError(f"continuation init metadata missing {field}")
-    for filename, field in (("adapter_model.safetensors", "adapter_sha256"), ("pointer.safetensors", "pointer_sha256")):
-        path = directory / filename
-        if not path.exists() or _sha(path.read_bytes()) != metadata[field]:
-            raise ValueError(f"continuation init {filename} hash mismatch")
-    if (set(metadata["marker_ids"]) != {"state", "question", "option_start", "option_end", "decide"} or
+    for field in ("ids", "strings"):
+        if not markers.get(field):
+            raise ValueError(f"continuation init manifest missing marker {field}")
+    if (set(markers["ids"]) != {"state", "question", "option_start", "option_end", "decide"} or
             any(isinstance(value, bool) or not isinstance(value, int) or value < 0
-                for value in metadata["marker_ids"].values()) or
-            len(set(metadata["marker_ids"].values())) != 5):
+                for value in markers["ids"].values()) or
+            len(set(markers["ids"].values())) != 5):
         raise ValueError("continuation init marker identity is invalid")
-    if (set(metadata["marker_strings"]) != set(metadata["marker_ids"]) or
-            any(not isinstance(value, str) or not value for value in metadata["marker_strings"].values())):
+    if (set(markers["strings"]) != set(markers["ids"]) or
+            any(not isinstance(value, str) or not value for value in markers["strings"].values())):
         raise ValueError("continuation init marker identity is invalid")
-    training = metadata.get("training", {})
-    source_config = metadata.get("config", {})
+    training = manifest["training"].get("metrics", {})
+    source_config = manifest["training"].get("config", {})
     source_training = source_config.get("training", {})
     correct_v7_config = (source_config.get("experiment_id") == "gemma3-1b-v7" and
                          source_training.get("seed") in {0, 1, 2} and source_training.get("epochs") == 2 and
@@ -182,36 +189,37 @@ def validate_init_metadata(checkpoint: str | Path, config) -> dict[str, Any]:
                          source_training.get("logical_batch") == 8 and
                          source_training.get("context_length") == 384 and
                          source_training.get("p_none_pair", .25) == .25)
-    full_v7 = (metadata.get("source_sha256") == DECISION_TRAIN_SHA256 and
-               metadata.get("manifest_sha256") == "a8f50e481b7d90b97da049e0ff6a01cee2f1ed204aed61a8265af0edbb5514d2" and
-               correct_v7_config and
+    full_v7 = (lineage.get("source_sha256") == DECISION_TRAIN_SHA256 and
+                lineage.get("manifest_sha256") == "a8f50e481b7d90b97da049e0ff6a01cee2f1ed204aed61a8265af0edbb5514d2" and
+                correct_v7_config and
                 training.get("complete") is True and training.get("logical_steps") == 3144 and
                 training.get("processed_records") == 25152 and training.get("source_count", 12576) == 12576 and
-                not metadata.get("diagnostic_smoke_init") and not metadata.get("smoke_only") and
-                not metadata.get("continuation", {}).get("diagnostic_smoke_init"))
-    metadata["initializer_kind"] = "full-v7" if full_v7 else "diagnostic-smoke-or-partial"
-    metadata["initializer_fingerprint"] = _sha((directory / "adapter_model.safetensors").read_bytes() +
-                                                 (directory / "pointer.safetensors").read_bytes())
-    return metadata
+                not lineage.get("diagnostic_smoke_init") and not lineage.get("smoke_only") and
+                not lineage.get("continuation", {}).get("diagnostic_smoke_init"))
+    return {"initializer_kind": "full-v7" if full_v7 else "diagnostic-smoke-or-partial",
+            "initializer_fingerprint": checkpoint_fingerprint(directory),
+            "config": source_config}
 
 
 def audit_prepared_tokens(path: str | Path, config, marker_path: str | Path) -> dict[str, Any]:
     """Audit every prepared record with the real Gemma tokenizer, never truncate."""
-    from transformers import AutoTokenizer
-    from ..materialize import materialize
-    from ..tokenization import MarkerMap, encode, rows_of
+    from ..configuration.resolved import resolve_experiment_config
+    resolved = resolve_experiment_config(config)
+    from ..domain.materialize import materialize
+    from ..domain.tokenization import rows_of
     from ..training.batching import variants_for_request
     rows, _ = load_prepared(path)
-    tokenizer = AutoTokenizer.from_pretrained(config.model.name, revision=config.model.revision)
-    markers = MarkerMap.load(marker_path, tokenizer)
+    tokenizer = resolved.load_tokenizer()
+    markers = resolved.load_markers(tokenizer, artifact_path=marker_path)
     caps = (config.training.state_cap, config.training.branch_cap, config.training.packed_cap)
     maxima = [0, 0, 0]; overflow = []
     for row in rows:
         try:
             variants = variants_for_request(row, seed=config.training.seed, epoch=0, tokenizer=tokenizer,
-                                            markers=markers, caps=(10**9, 10**9, 10**9),
-                                            p_none=config.training.p_none, p_none_distract=config.training.p_none_distract,
-                                            p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair)
+                                             markers=markers, caps=(10**9, 10**9, 10**9),
+                                             p_none=config.training.p_none, p_none_distract=config.training.p_none_distract,
+                                             p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair,
+                                             encoder=resolved.encode_record)
             for variant in variants:
                 encoded = variant.encoding
                 _, _, questions = rows_of(encoded)

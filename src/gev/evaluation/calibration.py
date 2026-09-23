@@ -44,18 +44,8 @@ def _report_for(run: Path, rows_path: Path) -> tuple[dict, Path]:
     checkpoint = report_path.parent.parent / "checkpoint"
     recorded = report.get("provenance", {}).get("checkpoint_fingerprint")
     if recorded and checkpoint.is_dir():
-        digest = hashlib.sha256()
-        for name in ("metadata.json", "adapter_model.safetensors", "pointer.safetensors"):
-            file = checkpoint / name
-            if not file.exists():
-                raise ValueError("report checkpoint identity is incomplete")
-            digest.update(file.read_bytes())
-        if digest.hexdigest() != recorded and "temperature" not in json.loads((checkpoint / "metadata.json").read_text()):
-            raise ValueError("report/checkpoint identity mismatch")
-    stable_recorded = report.get("provenance", {}).get("model_fingerprint")
-    if stable_recorded and checkpoint.is_dir():
-        from ..checkpoint import checkpoint_fingerprint
-        if checkpoint_fingerprint(checkpoint) != stable_recorded:
+        from ..artifacts.checkpoint_identity import checkpoint_fingerprint
+        if checkpoint_fingerprint(checkpoint) != recorded:
             raise ValueError("report/checkpoint model identity mismatch")
     coverage = report.get("coverage", {})
     if coverage.get("rejected_records", 0) or coverage.get("truncated_records", 0) or coverage.get("evaluated_records") != coverage.get("requested_records"):
@@ -119,14 +109,15 @@ def calibrate(run: str | Path, *, rows: str | Path | None = None,
                             "suite_sha256": report["provenance"]["suite_sha256"], "split": split,
                             "raw_rows": True, "method": f"Kev log-grid {points} points"}
     result["checkpoint_updated"] = False
-    checkpoint = run / "checkpoint" if (run / "checkpoint").is_dir() else (run if (run / "metadata.json").exists() else None)
+    from ..artifacts.checkpoint_identity import MANIFEST_FILENAME, read_checkpoint_manifest
+    checkpoint = run / "checkpoint" if (run / "checkpoint").is_dir() else (run if (run / MANIFEST_FILENAME).exists() else None)
     if update_checkpoint:
         if protocol != "kev-release" or checkpoint is None:
             raise ValueError("only a release fit may update a checkpoint")
-        metadata_path = checkpoint / "metadata.json"
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        metadata["temperature"] = temperature
-        metadata["temperature_fit"] = result["provenance"]
+        metadata_path = checkpoint / MANIFEST_FILENAME
+        metadata = read_checkpoint_manifest(checkpoint)
+        metadata["calibration"]["temperature"] = temperature
+        metadata["calibration"]["fit"] = result["provenance"]
         fd, temporary = tempfile.mkstemp(prefix=".metadata.", dir=checkpoint)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

@@ -1,10 +1,18 @@
 [experiment]
 id = "gemma3-1b-v7"
 
+[protocol]
+id = "kev-decision-v7"
+version = 1
+
 [model]
+family = "gemma3_text"
 name = "google/gemma-3-1b-pt"
 revision = "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29"
 expected_model_type = "gemma3_text"
+
+[backend]
+id = "torch"
 
 [training]
 seed = 2
