@@ -1,0 +1,32 @@
+[experiment]
+id = "gemma3-1b-v7"
+
+[model]
+name = "google/gemma-3-1b-pt"
+revision = "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29"
+expected_model_type = "gemma3_text"
+
+[training]
+seed = 2
+epochs = 2
+learning_rate = 0.0001
+dtype = "fp32"
+context_length = 384
+state_cap = 384
+branch_cap = 1024
+packed_cap = 2048
+logical_batch = 8
+microbatch = 1
+weight_decay = 0.01
+p_none = 0.1
+p_none_distract = 0.12
+p_distract = 0.15
+p_none_pair = 0.25
+
+[runtime]
+device = "auto"
+mps_fallback = false
+output_root = "runs"
+attn_implementation = "eager"
+gradient_checkpointing = false
+empty_cache = false

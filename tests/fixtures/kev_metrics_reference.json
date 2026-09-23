@@ -1,0 +1,7 @@
+{
+  "rows": [
+    {"p": [0.8, 0.2], "label": 0, "type": "choice", "variant": "clean", "source": "a", "task": "x", "id": "1", "question": "q", "keys": ["a", "b"], "group": "g"},
+    {"p": [0.4, 0.6], "label": 0, "type": "choice", "variant": "clean", "source": "a", "task": "x", "id": "2", "question": "q", "keys": ["a", "b"], "group": "h"}
+  ],
+  "expected": {"nll": 0.5697171415941824, "acc": 0.5, "ece": 0.4, "brier": 0.4, "aurc": 0.25}
+}

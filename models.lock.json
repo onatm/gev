@@ -1,0 +1,8 @@
+{
+  "model": "google/gemma-3-1b-pt",
+  "revision": "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29",
+  "expected_model_type": "gemma3_text",
+  "expected_parameter_count": 999885952,
+  "weights": "not included in the repository; fetched from the pinned gated model revision when needed",
+  "tokenizer_and_config": "inspect-model may resolve through Hugging Face credentials"
+}

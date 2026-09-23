@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "files": {
+    "development.jsonl": {"sha256": "ff374c49c6c9f15f8a56fb274b4a4857d20497eb8dd1ac07ce01560e682a5f2e", "records": 764, "questions": 764},
+    "test.jsonl": {"sha256": "c30a91274f9b483aac9e4f02ada5dea953b3f1a2829456e0bc07806c4e73b517", "records": 764, "questions": 764}
+  },
+  "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": false},
+  "eval_only": true
+}

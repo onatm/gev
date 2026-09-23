@@ -1,0 +1,32 @@
+[project]
+name = "gev"
+version = "0.1.0"
+description = "Gev foundation and reproducible experiment tooling"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "accelerate>=1.10,<2",
+  "huggingface-hub>=1.5,<2",
+  "numpy>=2.2,<3",
+  "peft==0.21.0",
+  "psutil>=7,<8",
+  "pydantic>=2.11,<3",
+  "safetensors>=0.6,<1",
+  "torch==2.8.0",
+  "transformers==5.17.0",
+  "truststore>=0.10,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9"]
+data = ["datasets>=4,<5"]
+
+[project.scripts]
+gev = "gev.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
