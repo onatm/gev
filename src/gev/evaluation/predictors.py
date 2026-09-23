@@ -6,8 +6,47 @@ import math
 
 import torch
 
+from ..api_request import api_request
 from ..materialize import materialize
+from ..representation import to_record
 from ..tokenization import encode
+
+
+def predict_request(request, model, tokenizer, markers, *, state_cap, branch_cap,
+                    packed_cap, temperature=1.0):
+    """Predict an unlabeled Kev-style request without entering evaluation code."""
+    if isinstance(temperature, bool) or not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("inference temperature must be finite and positive")
+    public_request = api_request(request)
+    record, _ = to_record(public_request)
+    encoded = encode(tokenizer, record, markers, state_cap=state_cap,
+                     branch_cap=branch_cap, packed_cap=packed_cap)
+
+    model.eval()
+    model.head.temperature = float(temperature)
+    with torch.no_grad():
+        probabilities = model.probs(encoded)
+    questions = record["questions"]
+    if len(probabilities) != len(questions):
+        raise ValueError("model returned a different number of questions than the request")
+
+    results = []
+    for question, values in zip(questions, probabilities, strict=True):
+        scores = [float(value) for value in values.detach().cpu().tolist()]
+        if len(scores) != len(question["keys"]):
+            raise ValueError(f"model returned an invalid option count for question {question['qid']!r}")
+        if any(not math.isfinite(score) or score < 0 for score in scores):
+            raise ValueError(f"model returned invalid probabilities for question {question['qid']!r}")
+        winner_index = max(range(len(scores)), key=scores.__getitem__)
+        winner = question["keys"][winner_index]
+        results.append({
+            "id": question["qid"],
+            "type": question["qtype"],
+            "probabilities": dict(zip(question["keys"], scores, strict=True)),
+            "winner": winner,
+            "winner_probability": scores[winner_index],
+        })
+    return {"inference_temperature": float(temperature), "questions": results}
 
 
 class LocalPredictor:

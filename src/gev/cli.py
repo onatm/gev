@@ -11,6 +11,7 @@ import random
 import dataclasses
 import hashlib
 import os
+import math
 
 from .config import ConfigError, load_config
 from .inspect_model import inspect_model
@@ -93,6 +94,47 @@ def _config(path: str):
         raise SystemExit(f"configuration error: {exc}") from exc
 
 
+def _predict(args) -> dict:
+    """Load the selected checkpoint and predict one unlabeled request."""
+    from .checkpoint import load_checkpoint
+    from .evaluation.predictors import predict_request
+
+    if not math.isfinite(args.temperature) or args.temperature <= 0:
+        raise SystemExit("prediction temperature must be finite and positive")
+    try:
+        text = sys.stdin.read() if args.input == "-" else Path(args.input).read_text(encoding="utf-8")
+        request = json.loads(text)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"prediction input error: {exc}") from exc
+    if not isinstance(request, dict):
+        raise SystemExit("prediction input must be one Kev-style request object")
+
+    value = _config(args.config)
+    if args.device is not None:
+        value = dataclasses.replace(value, runtime=dataclasses.replace(value.runtime, device=args.device))
+    configure_runtime(value.runtime.device, value.runtime.mps_fallback)
+    import torch
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(value.model.name, revision=value.model.revision)
+    markers = MarkerMap.load(value.model.marker_artifact or "runs/reference/model-marker-map.json", tokenizer)
+    checkpoint = Path(args.run) / "checkpoint" if (Path(args.run) / "checkpoint").exists() else Path(args.run)
+    metadata = json.loads((checkpoint / "metadata.json").read_text(encoding="utf-8"))
+    if any(metadata.get(key) != getattr(value.training, key)
+           for key in ("state_cap", "branch_cap", "packed_cap")):
+        raise SystemExit("prediction config caps do not match checkpoint contract")
+    device = args.device or value.runtime.device
+    if device == "auto":
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+    model, _ = load_checkpoint(checkpoint, config=value, device=device, tokenizer=tokenizer,
+                               expected_marker_map=markers)
+    return predict_request(request, model, tokenizer, markers,
+                           state_cap=value.training.state_cap,
+                           branch_cap=value.training.branch_cap,
+                           packed_cap=value.training.packed_cap,
+                           temperature=args.temperature)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gev")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -135,6 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     eval_cmd.add_argument("--run", required=True); eval_cmd.add_argument("--config", default="configs/gemma3-1b-v7.toml")
     eval_cmd.add_argument("--suite", default="decision-v7", choices=("decision-v7", "transfer-v4")); eval_cmd.add_argument("--split", default="development", choices=("development", "calibration"))
     eval_cmd.add_argument("--data", default="data"); eval_cmd.add_argument("--out", required=True); eval_cmd.add_argument("--temperature", type=float, default=None); eval_cmd.add_argument("--device", choices=("cpu", "mps"), default=None); eval_cmd.add_argument("--execution", choices=("rows", "packed"), default=None)
+    predict_cmd = commands.add_parser("predict", help="predict an unlabeled Kev-style request")
+    predict_cmd.add_argument("--run", required=True, help="checkpoint run directory or checkpoint directory")
+    predict_cmd.add_argument("--config", required=True, help="saved experiment config for this checkpoint")
+    predict_cmd.add_argument("--input", required=True, help="JSON request file, or '-' to read one request from stdin")
+    predict_cmd.add_argument("--temperature", type=float, default=1.0, help="inference temperature (default: raw T=1)")
+    predict_cmd.add_argument("--device", choices=("cpu", "mps"), default=None)
     locked_cmd = commands.add_parser("eval-locked", help="explicit, once-only frozen test evaluation")
     locked_cmd.add_argument("--run", required=True); locked_cmd.add_argument("--selection", required=True)
     locked_cmd.add_argument("--suites", default="decision-v7,transfer-v4"); locked_cmd.add_argument("--data", default="data")
@@ -382,6 +430,9 @@ def main(argv: list[str] | None = None) -> int:
                                "question_count": sum(len(row.get("questions", {})) for row in rows)}
         write_measurement(args.out, result)
         print(json.dumps(result, indent=2, sort_keys=True)); return 0 if result.get("status") == "passed" else 2
+    elif args.command == "predict":
+        print(json.dumps(_predict(args), indent=2, sort_keys=True, allow_nan=False))
+        return 0
     elif args.command == "eval":
         value = _config(args.config)
         if args.device is not None:
