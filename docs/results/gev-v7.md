@@ -1,12 +1,14 @@
-# Gev v7: three-seed study and locked test
+# Gev v7 early prototype: three-seed study and locked test
 
-This is the completed Gev/Gemma 3 1B v7 experiment, run on 2026-09-23 with
-seeds 0, 1, and 2. The study selected seed 0 on **transfer-v4 development
-clean accuracy**, with transfer Brier and decision-v7 development task-average
-NLL as tie-breakers. Only that selected checkpoint was evaluated on the locked
-test partitions. All **Gev** scores below are from the saved reports at raw
-temperature **T=1**; the screening temperature fitted on calibration data was
-not applied to the checkpoint or the locked test.
+This is a historical result from the **pre-refactor implementation**, run on
+2026-09-23 as an early prototype to verify the idea. It is not a measurement
+produced by the current modular runtime. The completed Gev/Gemma 3 1B v7
+experiment used seeds 0, 1, and 2. The study selected seed 0 on **transfer-v4
+development clean accuracy**, with transfer Brier and decision-v7 development
+task-average NLL as tie-breakers. Only that selected checkpoint was evaluated
+on the locked test partitions. All **Gev** scores below are from the saved
+reports at raw temperature **T=1**; the screening temperature fitted on
+calibration data was not applied to the checkpoint or the locked test.
 
 The checked-in, metric-only evidence is the
 [study result](../../reports/gev-v7/study-result.json),
@@ -14,7 +16,9 @@ The checked-in, metric-only evidence is the
 and [transfer-v4 locked-test report](../../reports/gev-v7/transfer-v4-test-report.json).
 These are copies of the completed local reports, not new evaluations. The
 per-example rows, predictions, datasets, logs, and model weights are not part
-of this results snapshot.
+of this results snapshot. The original run used the old checkpoint format;
+the current manifest-based runtime cannot load that saved model directly.
+These reports are not a reason to re-run the once-only locked test.
 
 ## Development: model selection
 
@@ -63,8 +67,8 @@ report the following results on the same frozen test partitions:
 
 Kev's numbers are published reference results, not Gev measurements. The
 backbones, tokenizers, and execution details differ; the point estimates alone
-are not a paired significance test. The [design research record](../design.md#published-research-baseline)
-also distinguishes Kev v7 from Kev's later Night 2 continuation.
+are not a paired significance test. This comparison is limited to the early
+prototype, not a current-runtime benchmark.
 
 ## Provenance and scope
 
@@ -74,9 +78,10 @@ also distinguishes Kev v7 from Kev's later Night 2 continuation.
 - Training: decision-v7 train SHA-256
   `7ed5254b5cb5291baefaceb09edf7e13110258211518c8038f4a12c11bd628ad`;
   12,576 source records, 25,152 processed exposures, and 3,144 logical steps
-  per seed. The [v7 config](../../configs/gemma3-1b-v7.toml) records the recipe;
-  the study result records its recipe hash, split hashes, and each trial's
-  coverage and mechanism checks.
+  per seed. The [study result](../../reports/gev-v7/study-result.json) records
+  the original recipe hash, split hashes, and each trial's coverage and
+  mechanism checks. The current [v7 config](../../configs/gemma3-1b-v7.toml)
+  includes post-refactor runtime metadata and is not the saved run config.
 - Selected weights: seed 0, stable model fingerprint
   `aaba70be38e70e0af2826d6a0cd7b44e408c867d81eaed576e3e72bb12e7acce`.
   The selection registered `temperature: 1.0` and verified full-v7 lineage.
@@ -85,6 +90,7 @@ also distinguishes Kev v7 from Kev's later Night 2 continuation.
   reports include the suite manifest, test-source, model, and result-row hashes.
   Their `raw_clean` and `calibrated_clean` values coincide because T=1.
 
-The [reproduction workflow](../reproduction.md) documents how the study and
-locked evaluation were performed. Test results are reported once for the
-selected checkpoint; seeds 1 and 2 have development results only.
+The stored reports document the completed study and locked evaluation. Test
+results were reported once for the selected checkpoint; seeds 1 and 2 have
+development results only. For the current code's boundaries and held-out
+protocol, see the [architecture overview](../ARCHITECTURE.md).

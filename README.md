@@ -2,8 +2,11 @@
 
 Gev is a reproducible experiment pipeline for decision models. It pairs a
 pinned Gemma 3 text backbone with versioned decision-data suites, controlled
-training, and a once-only protocol for held-out evaluation. Gev has no
-comparable full-study result; smoke runs are diagnostics, not comparable scores.
+training, and a once-only protocol for held-out evaluation. An
+[early v7 prototype](docs/results/gev-v7.md) trained on the pre-refactor
+implementation verified the idea with a three-seed study and one locked test
+of its selected checkpoint. Its saved results are historical evidence, not a
+new measurement of this runtime. Smoke runs remain diagnostics.
 
 ## What you can do
 
@@ -11,6 +14,7 @@ comparable full-study result; smoke runs are diagnostics, not comparable scores.
 - Fetch and verify approved non-test data, then run a small smoke workflow.
 - Plan and run the pinned multi-seed study when data and compute are available.
 - Evaluate development data and compare completed study runs.
+- Predict on an unlabeled request using a current-format checkpoint.
 
 ## Get started
 
@@ -75,15 +79,29 @@ mise exec -- uv run gev study run configs/gemma3-1b-v7.toml \
   --seeds 0,1,2 --data data --out runs/study-v7
 ```
 
-This is a substantial manual run, and this repository does not report a
-comparable full Gev study result. For tests, fetch and verify decision-v7 train,
-calibration, and development plus transfer-v4 development; tests do not fetch
-data and do not require the held-out test partition:
+This is a substantial manual run. The checked-in
+[prototype results](docs/results/gev-v7.md) came from the old implementation;
+its model weights are not included, and its legacy checkpoint cannot be loaded
+by the current manifest-based runtime. For inference with a new-format run,
+pass one unlabeled Kev-style JSON request from a file or stdin, for example:
+
+```bash
+mise exec -- uv run gev predict runs/study-v7/seed-0 --input request.json
+```
+
+`predict` uses the checkpoint's saved configuration by default. It returns
+per-question probabilities and the winning option at raw T=1 unless a positive
+`--temperature` is supplied; it does not read suites or run evaluation.
+
+For tests, fetch and verify decision-v7 train, calibration, and development
+plus transfer-v4 development; tests do not fetch data and do not require the
+held-out test partition:
 
 ```bash
 mise exec -- uv run pytest -q
 ```
 
 See [Architecture](docs/ARCHITECTURE.md) for system boundaries and scientific
-trust rules. The [Kev source revision](https://github.com/jaredpalmer/kev/tree/08ab0b87d27cb5577a3b371ad7ed4e4686b0502b)
-is pinned as research reference only, not a Gev result or runtime dependency.
+trust rules and [prototype results](docs/results/gev-v7.md) for the recorded
+measurements. The [Kev source revision](https://github.com/jaredpalmer/kev/tree/08ab0b87d27cb5577a3b371ad7ed4e4686b0502b)
+is pinned as research reference only, not a Gev runtime dependency.

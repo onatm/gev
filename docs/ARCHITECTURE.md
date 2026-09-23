@@ -64,6 +64,11 @@ Run artifacts record the resolved recipe, data lineage, model/tokenizer identity
 and execution details; hashes and large provenance tables are kept with those
 canonical files rather than repeated here.
 
+The [v7 prototype results](results/gev-v7.md) are a historical snapshot from
+the pre-refactor runtime. The metric-only reports are retained as evidence that
+the approach was tested; they do not establish a result for the current runtime
+or supply a current-format inference checkpoint.
+
 Ordinary fetch, verification, and evaluation paths are restricted to train,
 calibration, and development partitions. Candidate registration validates a
 complete eligible study and its selected checkpoint without reading test rows;
