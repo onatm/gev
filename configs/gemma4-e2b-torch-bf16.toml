@@ -1,5 +1,5 @@
 # Gemma 4 E2B text decoder on PyTorch (CUDA/MPS/CPU). BF16 frozen base, FP32 LoRA + pointer head.
-name = "gev-gemma4-e2b"
+name = "gev-e2b"
 backend = "torch"
 dtype = "bf16"
 

@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     push = commands.add_parser("push", help="upload a checkpoint to the Hugging Face Hub")
     push.add_argument("run", help="run or checkpoint directory")
-    push.add_argument("--repo", required=True, help="e.g. user/gev-gemma4-e2b")
+    push.add_argument("--repo", required=True, help="e.g. user/gev-e2b")
     push.add_argument("--public", action="store_true")
     push.add_argument("--report", action="append", default=[], help="evaluation report.json for the model card")
     return parser

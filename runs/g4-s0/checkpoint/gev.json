@@ -35,7 +35,7 @@
     "dtype": "bf16"
   },
   "config": {
-    "name": "gev-gemma4-e2b",
+    "name": "gev-e2b",
     "model": {
       "name": "google/gemma-4-E2B",
       "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",

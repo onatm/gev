@@ -1,5 +1,5 @@
 # Gemma 4 E2B text decoder on MLX (Apple Silicon GPU). Same recipe and checkpoint format as Torch.
-name = "gev-gemma4-e2b"
+name = "gev-e2b"
 backend = "mlx"
 dtype = "bf16"
 
