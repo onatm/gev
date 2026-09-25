@@ -1,40 +1,17 @@
-[experiment]
-id = "gemma3-1b-v7"
-
-[protocol]
-id = "kev-decision-v7"
-version = 1
+# Gemma 3 1B v7 recipe (the historical prototype in docs/results): FP32, eager attention.
+name = "gev-gemma3-1b"
+backend = "torch"
+dtype = "fp32"
+attn_implementation = "eager"
 
 [model]
-family = "gemma3_text"
+family = "gemma3"
 name = "google/gemma-3-1b-pt"
 revision = "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29"
-expected_model_type = "gemma3_text"
-
-[backend]
-id = "torch"
 
 [training]
-seed = 2
+seed = 0
 epochs = 2
-learning_rate = 0.0001
-dtype = "fp32"
-context_length = 384
-state_cap = 384
-branch_cap = 2048
-packed_cap = 2048
+learning_rate = 1e-4
 logical_batch = 8
 microbatch = 1
-weight_decay = 0.01
-p_none = 0.1
-p_none_distract = 0.12
-p_distract = 0.15
-p_none_pair = 0.25
-
-[runtime]
-device = "auto"
-mps_fallback = false
-output_root = "runs"
-attn_implementation = "eager"
-gradient_checkpointing = false
-empty_cache = false

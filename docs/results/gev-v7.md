@@ -81,16 +81,18 @@ prototype, not a current-runtime benchmark.
   per seed. The [study result](../../reports/gev-v7/study-result.json) records
   the original recipe hash, split hashes, and each trial's coverage and
   mechanism checks. The current [v7 config](../../configs/gemma3-1b-v7.toml)
-  includes post-refactor runtime metadata and is not the saved run config.
+  keeps the recipe's hyperparameters but runs on the simplified runtime, so it
+  is not the saved run config.
 - Selected weights: seed 0, stable model fingerprint
   `aaba70be38e70e0af2826d6a0cd7b44e408c867d81eaed576e3e72bb12e7acce`.
   The selection registered `temperature: 1.0` and verified full-v7 lineage.
 - Locked protocol: one evaluation of seed 0 against decision-v7 and transfer-v4
-  test, with complete ledger entries for both suites. The checked-in test
+  test, recorded in the (since removed) once-only ledger for both suites. The checked-in test
   reports include the suite manifest, test-source, model, and result-row hashes.
   Their `raw_clean` and `calibrated_clean` values coincide because T=1.
 
 The stored reports document the completed study and locked evaluation. Test
 results were reported once for the selected checkpoint; seeds 1 and 2 have
-development results only. For the current code's boundaries and held-out
-protocol, see the [architecture overview](../ARCHITECTURE.md).
+development results only. The prototype's once-only ledger and its checkpoint
+format have since been removed; see the [architecture overview](../ARCHITECTURE.md)
+for the current runtime.

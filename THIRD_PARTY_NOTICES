@@ -8,13 +8,15 @@ remain applicable to downloaded code, weights, tokenizers, and datasets:
   Adapted files are pinned directly at
    https://raw.githubusercontent.com/jaredpalmer/kev/08ab0b87d27cb5577a3b371ad7ed4e4686b0502b/kev/.
   Metrics and batching semantics are adapted from the pinned
-  `kev/metrics.py`, `kev/benchmark.py`, and `kev/train.py` files.
+  `kev/metrics.py`, `kev/data.py`, `kev/api.py`, and `kev/model.py` files.
 * Gemma 3, Google, model terms/license: https://ai.google.dev/gemma/terms
-  (the Gemma license is not Apache-2.0; it governs google/gemma-3-1b-pt).
+  (the Gemma license is not Apache-2.0; it governs google/gemma-3-1b-pt and
+  adapters derived from it).
+* Gemma 4, Google, Apache-2.0: https://huggingface.co/google/gemma-4-E2B.
+* MLX and mlx-lm, Apple, MIT, https://github.com/ml-explore/mlx (optional).
 * Hugging Face Transformers, Apache-2.0, https://github.com/huggingface/transformers.
 * PyTorch, BSD-style license, https://github.com/pytorch/pytorch.
 * PEFT, Apache-2.0, https://github.com/huggingface/peft.
-* truststore, MIT, https://github.com/sethmlarson/truststore.
 
 Dataset licenses and individual source-dataset attributions are provenance
 metadata, not a blanket redistribution grant.
