@@ -50,6 +50,41 @@ class RowModel(nn.Module):
         return mx.where(valid, scores, mx.array(-1e9, dtype=mx.float32))
 
 
+def checkpoint_layers(decoder) -> None:
+    """Recompute each decoder layer's activations in the backward pass instead of storing them.
+
+    Each layer's class is swapped for a subclass (parameter paths are unchanged), so only
+    this decoder is affected. ``mx.checkpoint`` takes arrays only: the mask, cache, and
+    offset are closed over, and the offset comes back through a side channel.
+    """
+    for layer in decoder.layers:
+        layer.__class__ = _checkpointed(type(layer))
+
+
+def _checkpointed(cls):
+    if getattr(cls, "_gev_checkpointed", False):
+        return cls
+
+    class Checkpointed(cls):
+        _gev_checkpointed = True
+
+        def __call__(self, x, mask=None, cache=None, per_layer_input=None, shared_kv=None, offset=None):
+            extra = {}
+
+            def inner(params, x, arrays):
+                self.update(params)
+                h, kvs, extra["offset"] = cls.__call__(self, x, mask, cache, per_layer_input=arrays.get("input"),
+                                                       shared_kv=arrays.get("kv"), offset=offset)
+                return h, kvs
+
+            arrays = {k: v for k, v in (("input", per_layer_input), ("kv", shared_kv)) if v is not None}
+            h, kvs = mx.checkpoint(inner)(self.trainable_parameters(), x, arrays)
+            return h, kvs, extra["offset"]
+
+    Checkpointed.__name__ = Checkpointed.__qualname__ = f"Checkpointed{cls.__name__}"
+    return Checkpointed
+
+
 def load_decoder(config: Config):
     """Load the pinned multimodal Gemma 4 checkpoint and keep only its text decoder."""
     from huggingface_hub import snapshot_download
@@ -93,6 +128,8 @@ class MlxRunner:
         linear_to_lora_layers(decoder, len(decoder.layers), {
             "rank": model.lora_rank, "scale": model.lora_alpha / model.lora_rank,
             "dropout": model.lora_dropout, "keys": keys})
+        if config.gradient_checkpointing:
+            checkpoint_layers(decoder)
         hidden = decoder.embed_tokens.weight.shape[1]
         self.model = RowModel(decoder, PointerHead(hidden, model.pointer_width))
         self.optimizers = None

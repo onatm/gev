@@ -69,6 +69,21 @@ def test_training_reduces_loss_and_round_trips(tokenizer, tmp_path):
     assert np.isclose(runner.train_step(batch, 1e-3, 1e-3), fresh.train_step(batch, 1e-3, 1e-3), rtol=1e-4)
 
 
+def test_gradient_checkpointing_matches_plain_training(tokenizer):
+    config, plain = mlx_runner()
+    checkpointed = MlxRunner(config.replace(gradient_checkpointing=True), decoder=mlx_decoder(gemma4_backbone()))
+    assert all(type(layer).__name__.startswith("Checkpointed") for layer in checkpointed.model.decoder.layers)
+    batch = variants(config, tokenizer)
+    for runner in (plain, checkpointed):
+        runner.init_optimizer()
+    for _ in range(3):
+        assert np.isclose(plain.train_step(batch, 3e-3, 3e-3), checkpointed.train_step(batch, 3e-3, 3e-3), rtol=1e-5)
+    encodings = [v["encoding"] for v in batch]
+    for x, y in zip(plain.logits(encodings), checkpointed.logits(encodings)):
+        for a, b in zip(x, y):
+            np.testing.assert_allclose(a, b, atol=1e-5)
+
+
 def test_checkpoints_move_between_torch_and_mlx(tokenizer, tmp_path):
     """Train on Torch, serve on MLX (and back): same checkpoint, same logits."""
     torch_config = tiny_config("gemma4")

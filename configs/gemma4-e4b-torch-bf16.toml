@@ -1,0 +1,17 @@
+# Gemma 4 E4B text decoder on PyTorch (CUDA). BF16 frozen base, FP32 LoRA + pointer head.
+name = "gev-e4b"
+backend = "torch"
+dtype = "bf16"
+
+[model]
+family = "gemma4"
+name = "google/gemma-4-E4B"
+revision = "411aa17b749aa952df1359d2dcea73917a544d9a"
+
+[training]
+seed = 0
+epochs = 2
+learning_rate = 1e-4
+logical_batch = 8
+microbatch = 1        # records per forward; raise if an H100 has headroom (see docs/training.md)
+save_every = 250

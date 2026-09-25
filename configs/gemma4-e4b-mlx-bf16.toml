@@ -1,0 +1,18 @@
+# Gemma 4 E4B text decoder on MLX (Apple Silicon GPU). Same recipe and checkpoint format as Torch.
+name = "gev-e4b"
+backend = "mlx"
+dtype = "bf16"
+gradient_checkpointing = true   # E4B activations are ~2.8x E2B per token; keeps a 64 GB Mac in budget
+
+[model]
+family = "gemma4"
+name = "google/gemma-4-E4B"
+revision = "411aa17b749aa952df1359d2dcea73917a544d9a"
+
+[training]
+seed = 0
+epochs = 2
+learning_rate = 1e-4
+logical_batch = 8
+microbatch = 1        # MLX is compute-bound here; larger microbatches only add memory
+save_every = 250

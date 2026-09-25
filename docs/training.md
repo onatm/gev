@@ -72,8 +72,9 @@ and rows reach about 1,000 tokens. On Apple MPS, `microbatch = 1` used about
 31 GB, and a whole 8-record batch with `microbatch = 8` ran out of memory at
 88 GB. Start on a 48–80 GB GPU (L40S, A100, or H100) with the checked-in
 `microbatch = 1`. Watch `nvidia-smi` for 20 steps, then raise `microbatch` if
-there is headroom. If memory is short, set `gradient_checkpointing = true`: it
-trades roughly a third more compute for much less memory. Confirm throughput
+there is headroom. If memory is short, set `gradient_checkpointing = true` (a
+top-level config key, supported by both backends): it trades roughly a third
+more compute for much less memory. Confirm throughput
 with `--max-steps 20` before a full run:
 
 ```bash
