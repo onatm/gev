@@ -1,8 +1,40 @@
 {
-  "model": "google/gemma-3-1b-pt",
-  "revision": "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29",
-  "expected_model_type": "gemma3_text",
-  "expected_parameter_count": 999885952,
-  "weights": "not included in the repository; fetched from the pinned gated model revision when needed",
-  "tokenizer_and_config": "inspect-model may resolve through Hugging Face credentials"
+  "models": [
+    {
+      "model": "google/gemma-3-1b-pt",
+      "revision": "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29",
+      "expected_model_type": "gemma3_text",
+      "family": "gemma3_text",
+      "backend": "torch",
+      "output_model_id": "gev-gemma3-1b",
+      "expected_parameter_count": 999885952,
+      "weights": "not included in the repository; fetched from the pinned gated model revision when needed",
+      "tokenizer_and_config": "inspect-model may resolve through Hugging Face credentials"
+    },
+    {
+      "model": "google/gemma-4-E2B",
+      "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+      "expected_model_type": "gemma4",
+      "family": "gemma4_e2b_text",
+      "output_model_id": "gev-gemma4-e2b",
+      "source_weights_dtype": "bf16",
+      "backend_matrix": [
+        {
+          "backend": "torch",
+          "devices": ["cpu", "mps", "cuda"],
+          "compute_dtypes": ["bf16", "fp32"]
+        },
+        {
+          "backend": "mlx",
+          "devices": ["gpu"],
+          "compute_dtypes": ["bf16", "fp32"]
+        }
+      ],
+      "expected_text_tensor_count": 600,
+      "expected_text_serialized_parameter_count": 4647449891,
+      "expected_text_parameter_count": 4628569344,
+      "qualification": "backend- and compute-precision-specific trained-checkpoint receipt",
+      "weights": "not included in the repository; fetched from the pinned public model revision when needed"
+    }
+  ]
 }
