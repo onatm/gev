@@ -72,11 +72,11 @@ served with MLX on a Mac, and the other way round.
 
 ```bash
 mise install
-mise exec -- uv sync --locked --extra dev --extra mlx  # omit --extra mlx off Apple Silicon
+uv sync --locked --extra dev --extra mlx  # omit --extra mlx off Apple Silicon
 ```
 
-Gemma 4 is public; for gated Gemma 3, run `mise exec -- uv run hf auth login`.
-The commands below run from the repository root. Use `mise exec -- uv run gev`
+Gemma 4 is public; for gated Gemma 3, run `uv run hf auth login`.
+The commands below run from the repository root. Use `uv run gev`
 as shown, or activate `.venv` and substitute `gev`.
 
 ## 2. Prepare data
@@ -85,8 +85,8 @@ The suites are pinned by the Hugging Face dataset revision and verified against
 the SHA-256 hashes in the packaged manifests every time they are read.
 
 ```bash
-mise exec -- uv run gev data fetch decision-v7 train calibration development
-mise exec -- uv run gev data fetch transfer-v4 development
+uv run gev data fetch decision-v7 train calibration development
+uv run gev data fetch transfer-v4 development
 ```
 
 Leave the test splits until after choosing a checkpoint on development data.
@@ -98,7 +98,7 @@ The reported run is `runs/g4-s0`. Train **seed 1** with the same MLX/BF16
 recipe in a fresh directory to compare with it:
 
 ```bash
-mise exec -- uv run gev train configs/gemma4-e2b-mlx-bf16.toml --seed 1 --out runs/g4-s1
+uv run gev train configs/gemma4-e2b-mlx-bf16.toml --seed 1 --out runs/g4-s1
 ```
 
 `gev train` saves the LoRA adapter and pointer head in `runs/g4-s1/checkpoint/`;
@@ -113,15 +113,15 @@ train with the PyTorch config on CUDA/MPS/CPU; this is a different backend from
 the reported seed-0 MLX run:
 
 ```bash
-mise exec -- uv run gev train configs/gemma4-e2b-mlx-bf16.toml --seed 1 --out runs/g4-s1 --resume
-mise exec -- uv run gev train configs/gemma4-e2b-torch-bf16.toml --seed 1 --out runs/g4-torch-s1
+uv run gev train configs/gemma4-e2b-mlx-bf16.toml --seed 1 --out runs/g4-s1 --resume
+uv run gev train configs/gemma4-e2b-torch-bf16.toml --seed 1 --out runs/g4-torch-s1
 ```
 
 A small structural smoke run uses an independently sampled subset:
 
 ```bash
-mise exec -- uv run gev data sample --out data/smoke
-mise exec -- uv run gev train configs/smoke.toml --data data/smoke --out runs/smoke --max-steps 20
+uv run gev data sample --out data/smoke
+uv run gev train configs/smoke.toml --data data/smoke --out runs/smoke --max-steps 20
 ```
 
 The reported `runs/g4-s0` checkpoint completed two epochs and all 3,144 steps.
@@ -152,9 +152,9 @@ magnitude faster; confirm with `--max-steps 20` before a full run.
 
 ```bash
 git clone <this repo> && cd gev
-curl https://mise.run | sh && mise install && mise exec -- uv sync --locked
-mise exec -- uv run gev data fetch decision-v7 train development
-mise exec -- uv run gev train configs/gemma4-e2b-torch-bf16.toml --out runs/profile-torch --max-steps 20
+curl https://mise.run | sh && mise install && uv sync --locked
+uv run gev data fetch decision-v7 train development
+uv run gev train configs/gemma4-e2b-torch-bf16.toml --out runs/profile-torch --max-steps 20
 ```
 
 `microbatch` in the config is how many augmented records share one forward pass;
@@ -165,8 +165,8 @@ the loss and gradients are the same for any value.
 Evaluate seed 1 on both development suites at raw temperature 1:
 
 ```bash
-mise exec -- uv run gev evaluate runs/g4-s1 --suite decision-v7 --split development --out runs/g4-s1/eval-dev
-mise exec -- uv run gev evaluate runs/g4-s1 --suite transfer-v4 --split development --out runs/g4-s1/eval-transfer-dev
+uv run gev evaluate runs/g4-s1 --suite decision-v7 --split development --out runs/g4-s1/eval-dev
+uv run gev evaluate runs/g4-s1 --suite transfer-v4 --split development --out runs/g4-s1/eval-transfer-dev
 ```
 
 Compare `clean.acc` in `runs/g4-s1/eval-transfer-dev/report.json` and
@@ -175,7 +175,7 @@ Compare `clean.acc` in `runs/g4-s1/eval-transfer-dev/report.json` and
 **when both runs' local `rows.jsonl` files are available**:
 
 ```bash
-mise exec -- uv run gev compare runs/g4-s1/eval-transfer-dev runs/g4-s0/eval-transfer-dev
+uv run gev compare runs/g4-s1/eval-transfer-dev runs/g4-s0/eval-transfer-dev
 ```
 
 Choose a checkpoint from **development** results, not test. The next section
@@ -188,8 +188,8 @@ Evaluate the selected checkpoint on decision-v7 calibration. Fit the
 temperature on those saved rows, save the fit, and update its checkpoint:
 
 ```bash
-mise exec -- uv run gev evaluate runs/g4-s1 --suite decision-v7 --split calibration --out runs/g4-s1/eval-cal
-mise exec -- uv run gev calibrate runs/g4-s1/eval-cal --update > runs/g4-s1/eval-cal/calibration.json
+uv run gev evaluate runs/g4-s1 --suite decision-v7 --split calibration --out runs/g4-s1/eval-cal
+uv run gev calibrate runs/g4-s1/eval-cal --update > runs/g4-s1/eval-cal/calibration.json
 ```
 
 Check that the temperature in `eval-cal/calibration.json` matches the one in
@@ -198,10 +198,10 @@ the test splits if they are not already present, then evaluate this selected
 checkpoint once on each:
 
 ```bash
-mise exec -- uv run gev data fetch decision-v7 test
-mise exec -- uv run gev data fetch transfer-v4 test
-mise exec -- uv run gev evaluate runs/g4-s1 --suite decision-v7 --split test --out runs/g4-s1/eval-test
-mise exec -- uv run gev evaluate runs/g4-s1 --suite transfer-v4 --split test --out runs/g4-s1/eval-transfer-test
+uv run gev data fetch decision-v7 test
+uv run gev data fetch transfer-v4 test
+uv run gev evaluate runs/g4-s1 --suite decision-v7 --split test --out runs/g4-s1/eval-test
+uv run gev evaluate runs/g4-s1 --suite transfer-v4 --split test --out runs/g4-s1/eval-transfer-test
 ```
 
 Reports include accuracy, NLL, Brier, ECE, coverage at 5%/1% error, and AURC
@@ -223,8 +223,8 @@ calibrated scores directly in each test report.
 ```bash
 echo '{"state": "Order #1 arrived damaged.", "questions": {"route": {"type": "choice",
   "instructions": "Which team handles this?", "criteria": {"billing": "Payments", "support": "Product issues"}}}}' \
-  | mise exec -- uv run gev predict runs/g4-s1
-mise exec -- uv run gev predict runs/g4-torch-s1 --backend mlx --input request.json  # Torch-trained weights on MLX
+  | uv run gev predict runs/g4-s1
+uv run gev predict runs/g4-torch-s1 --backend mlx --input request.json  # Torch-trained weights on MLX
 ```
 
 ## Publish
@@ -233,12 +233,12 @@ If seed 1 was selected, publish its checkpoint and its saved evaluation
 reports to a Hub repository you control (replace `your-hf-user`):
 
 ```bash
-mise exec -- uv run gev push runs/g4-s1 --repo your-hf-user/gev-e2b \
+uv run gev push runs/g4-s1 --repo your-hf-user/gev-e2b \
   --report runs/g4-s1/eval-dev/report.json \
   --report runs/g4-s1/eval-transfer-dev/report.json \
   --report runs/g4-s1/eval-test/report.json \
   --report runs/g4-s1/eval-transfer-test/report.json
-mise exec -- uv run gev predict your-hf-user/gev-e2b --input request.json
+uv run gev predict your-hf-user/gev-e2b --input request.json
 ```
 
 `push` uploads the checkpoint (PEFT `adapter_config.json` +
@@ -260,7 +260,7 @@ review its results before adding an equally narrow allowlist for that run.
 ## Tests
 
 ```bash
-mise exec -- uv run pytest -q
+uv run pytest -q
 ```
 
 The tests are offline. They use tiny random Gemma 3/Gemma 4 decoders and a
