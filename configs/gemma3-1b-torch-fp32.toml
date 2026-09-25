@@ -1,4 +1,4 @@
-# Gemma 3 1B v7 recipe (the historical prototype in docs/results): FP32, eager attention.
+# Gemma 3 1B FP32 example recipe; not the published Gemma 4 run.
 name = "gev-gemma3-1b"
 backend = "torch"
 dtype = "fp32"

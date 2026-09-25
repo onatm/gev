@@ -9,6 +9,10 @@ Jev-like implementation built on Qwen. It reuses parts of Kev: the request
 representation, augmentation, metrics, and the pinned `decision-v7` /
 `transfer-v4` evaluation suites.
 
+The completed [Gemma 4 E2B seed-0 result](docs/results/gemma4-e2b-s0.md)
+includes development and test measurements on both suites. It is a single-seed
+result, not a three-seed study.
+
 A Gev model is:
 
 - a frozen Gemma text decoder with a rank-16 **LoRA** adapter,
@@ -26,7 +30,7 @@ each other. Rows are right-padded and batched, which is exact for causal decoder
 | --- | --- | --- | --- |
 | `configs/gemma4-e2b-torch-bf16.toml` | Gemma 4 E2B (text decoder) | PyTorch: CUDA / MPS / CPU | Recommended for training |
 | `configs/gemma4-e2b-mlx-bf16.toml` | Gemma 4 E2B (text decoder) | MLX: Apple Silicon GPU | Local training and serving |
-| `configs/gemma3-1b-v7.toml` | Gemma 3 1B | PyTorch | FP32 recipe of the [v7 prototype](docs/results/gev-v7.md) |
+| `configs/gemma3-1b-torch-fp32.toml` | Gemma 3 1B | PyTorch | FP32 example; not the published Gemma 4 run |
 | `configs/smoke.toml` | Gemma 3 1B | PyTorch | Tiny structural run on a data sample |
 
 Checkpoints use one format on both backends, so a model trained with CUDA can be
@@ -36,7 +40,7 @@ served with MLX on a Mac, and the other way round.
 
 ```bash
 mise install
-mise exec -- uv sync --locked --extra dev            # add --extra mlx on Apple Silicon
+mise exec -- uv sync --locked --extra dev --extra mlx  # omit --extra mlx off Apple Silicon
 mise exec -- uv run hf auth login                     # Gemma 3 is gated; Gemma 4 is public
 ```
 
@@ -58,15 +62,41 @@ measurement of a model you have already selected on development data.
 
 ## Train
 
+To produce a Gemma 4 E2B model like the reported seed-0 run on Apple Silicon,
+fetch the training and development splits above, then use the **MLX** config and
+a new output directory. `gev train` writes the adapter and pointer head to
+`<run>/checkpoint/`; the Gemma base model is loaded separately when predicting.
+
 ```bash
-gev train configs/gemma4-e2b-torch-bf16.toml --out runs/g4-s0
-gev train configs/gemma4-e2b-torch-bf16.toml --out runs/g4-s1 --seed 1   # more seeds: a shell loop
-gev train configs/gemma4-e2b-torch-bf16.toml --out runs/g4-s0 --resume   # after an interruption
+gev train configs/gemma4-e2b-mlx-bf16.toml --out runs/my-g4-s0
+```
+
+For any additional seed, choose an unused integer `n`:
+
+```bash
+n=2
+gev train configs/gemma4-e2b-mlx-bf16.toml --out "runs/my-g4-s${n}" --seed "$n"
+```
+
+Resume an interrupted run, or train with the CUDA/MPS/CPU backend:
+
+```bash
+gev train configs/gemma4-e2b-mlx-bf16.toml --out runs/my-g4-s0 --resume
+gev train configs/gemma4-e2b-torch-bf16.toml --out runs/my-g4-torch-s0
+```
+
+A small smoke run uses the separate sample created above:
+
+```bash
 gev train configs/smoke.toml --data data/smoke --out runs/smoke --max-steps 20
 ```
 
-A run directory contains `config.json`, `log.jsonl` (loss, learning rate, and
-tokens/s per step), `state/` (the last resumable state, written every
+The reported `runs/g4-s0` checkpoint was trained with MLX/BF16, seed 0, two
+epochs, and all 3,144 steps; its saved `config.json` records the exact settings.
+Use a fresh directory for a new run rather than overwriting it.
+
+A run directory contains `config.json`, `log.jsonl` (loss, learning rate, tokens,
+and step duration), `state/` (the last resumable state, written every
 `save_every` steps), and the final `checkpoint/`. The epoch order and the
 augmentation are derived from the seed, so a resumed run follows the same data
 order as an uninterrupted one.
@@ -92,7 +122,7 @@ magnitude faster; confirm with `--max-steps 20` before a full run.
 git clone <this repo> && cd gev
 curl https://mise.run | sh && mise install && mise exec -- uv sync --locked
 mise exec -- uv run gev data fetch decision-v7 train development
-mise exec -- uv run gev train configs/gemma4-e2b-torch-bf16.toml --out runs/g4-s0 --max-steps 20
+mise exec -- uv run gev train configs/gemma4-e2b-torch-bf16.toml --out runs/profile-torch --max-steps 20
 ```
 
 `microbatch` in the config is how many augmented records share one forward pass;
@@ -100,11 +130,36 @@ the loss and gradients are the same for any value.
 
 ## Evaluate, calibrate, compare
 
+Evaluate both development suites before choosing a checkpoint. If serving
+calibrated probabilities, fit a temperature on the decision calibration split
+**after selection and before test**; this changes `checkpoint/gev.json`, not the
+weights. Reports always retain raw T=1 metrics in `clean`, and reports made
+after fitting also include `clean_calibrated`. Test is the final measurement of
+the chosen checkpoint, not a seed-selection tool.
+
 ```bash
-gev evaluate runs/g4-s0 --suite decision-v7 --split development --out runs/g4-s0/eval-dev
-gev evaluate runs/g4-s0 --suite decision-v7 --split calibration --out runs/g4-s0/eval-cal
-gev calibrate runs/g4-s0/eval-cal --update      # fit a serving temperature into the checkpoint
-gev compare runs/g4-s1/eval-dev runs/g4-s0/eval-dev
+gev evaluate runs/my-g4-s0 --suite decision-v7 --split development --out runs/my-g4-s0/eval-dev
+gev evaluate runs/my-g4-s0 --suite transfer-v4 --split development --out runs/my-g4-s0/eval-transfer-dev
+gev evaluate runs/my-g4-s0 --suite decision-v7 --split calibration --out runs/my-g4-s0/eval-cal
+```
+
+If you trained another seed, reuse its `n` to compare transfer development
+results before selecting a checkpoint:
+
+```bash
+n=2  # same value used for the additional run
+gev evaluate "runs/my-g4-s${n}" --suite transfer-v4 --split development --out "runs/my-g4-s${n}/eval-transfer-dev"
+gev compare "runs/my-g4-s${n}/eval-transfer-dev" runs/my-g4-s0/eval-transfer-dev
+```
+
+Optionally calibrate the chosen run, then evaluate its test splits once:
+
+```bash
+gev calibrate runs/my-g4-s0/eval-cal --update
+gev data fetch decision-v7 test
+gev data fetch transfer-v4 test
+gev evaluate runs/my-g4-s0 --suite decision-v7 --split test --out runs/my-g4-s0/eval-test
+gev evaluate runs/my-g4-s0 --suite transfer-v4 --split test --out runs/my-g4-s0/eval-transfer-test
 ```
 
 Reports include accuracy, NLL, Brier, ECE, coverage at 5%/1% error, and AURC on
@@ -114,19 +169,28 @@ logits; the temperature is applied only when scoring. At inference every questio
 row runs alone: in BF16, batching rows of different lengths shifts Gemma 4 logits by
 up to about 0.5, so a score would otherwise depend on its batch neighbours.
 
+The published `g4-s0` run fitted temperature after its decision-test report and
+before its transfer-test report. Its [results page](docs/results/gemma4-e2b-s0.md)
+compares raw scores across both tests and explains the additional calibrated
+transfer metrics.
+
 ## Predict
 
 ```bash
 echo '{"state": "Order #1 arrived damaged.", "questions": {"route": {"type": "choice",
   "instructions": "Which team handles this?", "criteria": {"billing": "Payments", "support": "Product issues"}}}}' \
-  | gev predict runs/g4-s0
-gev predict runs/g4-s0 --backend mlx --input request.json   # serve a Torch-trained model with MLX
+  | gev predict runs/my-g4-s0
+gev predict runs/my-g4-torch-s0 --backend mlx --input request.json  # serve a Torch-trained model with MLX
 ```
 
 ## Publish
 
 ```bash
-gev push runs/g4-s0 --repo <user>/gev-gemma4-e2b --report runs/g4-s0/eval-dev/report.json
+gev push runs/my-g4-s0 --repo <user>/gev-gemma4-e2b \
+  --report runs/my-g4-s0/eval-dev/report.json \
+  --report runs/my-g4-s0/eval-transfer-dev/report.json \
+  --report runs/my-g4-s0/eval-test/report.json \
+  --report runs/my-g4-s0/eval-transfer-test/report.json
 gev predict <user>/gev-gemma4-e2b --input request.json     # load straight from the Hub
 ```
 
@@ -135,6 +199,16 @@ gev predict <user>/gev-gemma4-e2b --input request.json     # load straight from 
 model card with the base model, license, and the reported metrics. Repositories
 are private unless you pass `--public`. Gemma 4 derivatives are Apache-2.0;
 Gemma 3 derivatives fall under the Gemma terms.
+
+### Evidence in Git
+
+`.gitignore` keeps generated data, weights, and resumable state local. For the
+selected `g4-s0` run it allowlists `config.json`, `log.jsonl`,
+`checkpoint/{gev,adapter_config}.json`, and the five `eval-*/report.json`
+files. They document the exact MLX recipe, training trace, and aggregate
+development/test scores. Per-question `rows.jsonl` and all `.safetensors` stay
+ignored. To publish a different run's reports, review it first and add an
+equally narrow allowlist; do not unignore all of `runs/`.
 
 ## Tests
 
@@ -147,5 +221,5 @@ word-level tokenizer to check augmentation and metric parity with pinned Kev
 code, row isolation, training, stateless resume, checkpoint round trips, and
 Torch↔MLX parity. MLX tests run only on Apple Silicon.
 
-See [Architecture](docs/ARCHITECTURE.md) for the module layout, and
-[the v7 prototype](docs/results/gev-v7.md) for the historical Gemma 3 result.
+See [Architecture](docs/ARCHITECTURE.md) for the module layout and
+[Gemma 4 E2B results](docs/results/gemma4-e2b-s0.md) for the measured run.
