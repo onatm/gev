@@ -120,6 +120,8 @@ def test_train_and_resume(tokenizer, sample_root, tmp_path):
     assert summary["complete"] and summary["steps"] == 8
     metadata = json.loads((tmp_path / "run" / "checkpoint" / "gev.json").read_text())
     assert metadata["trained_with"]["backend"] == "mlx"
+    entries = [json.loads(line) for line in (tmp_path / "run" / "log.jsonl").read_text().splitlines()]
+    assert all(entry["peak_memory_gb"] > 0 for entry in entries)
 
 
 def test_torch_and_mlx_optimize_identically(tokenizer, tmp_path):

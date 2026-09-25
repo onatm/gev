@@ -52,8 +52,8 @@ uv run gev train configs/smoke.toml --data data/smoke --out runs/smoke --max-ste
 ```
 
 A run directory contains `config.json`, `log.jsonl` (loss, learning rate, tokens,
-and step duration), `state/` (the last resumable state, written every
-`save_every` steps), and the final `checkpoint/`. The epoch order and the
+step duration, and peak memory on MLX and CUDA), `state/` (the last resumable
+state, written every `save_every` steps), and the final `checkpoint/`. The epoch order and the
 augmentation are derived from the seed, so a resumed run follows the same data
 order as an uninterrupted one.
 

@@ -175,6 +175,14 @@ class TorchRunner:
         self.optimizer.step()
         return float(total)
 
+    def peak_memory(self) -> int | None:
+        """Peak CUDA memory in bytes since the last call; None on MPS and CPU."""
+        if self.device != "cuda":
+            return None
+        peak = torch.cuda.max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        return peak
+
     # --- persistence -----------------------------------------------------------------------
 
     def save(self, directory: Path) -> None:

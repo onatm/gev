@@ -116,10 +116,14 @@ def train(config: Config, *, data_root: str | Path, out: str | Path, resume: boo
             entry = {"step": step + 1, "epoch": epoch, "loss": loss, "lr": lr, "variants": len(variants),
                      "tokens": sum(token_count(v["encoding"]) for v in variants),
                      "step_seconds": time.perf_counter() - step_started}
+            peak = runner.peak_memory()
+            if peak is not None:
+                entry["peak_memory_gb"] = peak / 1e9
             history.write(json.dumps(entry) + "\n")
             history.flush()
             log(f"step {step + 1}/{limit} loss {loss:.4f} lr {lr:.2e} "
-                f"{entry['tokens'] / entry['step_seconds']:.0f} tok/s")
+                f"{entry['tokens'] / entry['step_seconds']:.0f} tok/s"
+                + (f" peak {entry['peak_memory_gb']:.1f} GB" if peak is not None else ""))
             if t.save_every and (step + 1) % t.save_every == 0 and step + 1 < limit:
                 _save_state(out, runner, progress)
 

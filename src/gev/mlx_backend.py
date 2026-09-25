@@ -210,6 +210,12 @@ class MlxRunner:
         mx.eval(self.model.trainable_parameters(), [o.state for o in self.optimizers.values()])
         return float(total)
 
+    def peak_memory(self) -> int:
+        """Peak MLX memory in bytes since the last call."""
+        peak = mx.get_peak_memory()
+        mx.reset_peak_memory()
+        return peak
+
     # --- persistence -----------------------------------------------------------------------
 
     def save(self, directory: Path) -> None:
