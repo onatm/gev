@@ -12,7 +12,17 @@ from ..data.access import file_digest, load_verified_split, split_path
 from ..evaluation.benchmark import evaluate_records
 from ..artifacts.checkpoint_identity import checkpoint_fingerprint, read_checkpoint_manifest
 from ..configuration.resolved import resolve_experiment_config
+from ..models.policy import validate_development_evaluation_scope
 from ..backends.torch.environment import configure_runtime
+
+
+def _configure_runtime(config, resolved) -> None:
+    if config.backend.id == "torch":
+        configure_runtime(config.runtime.device, config.runtime.mps_fallback)
+    elif config.backend.id == "mlx":
+        from ..backends.mlx.qualification import require_tf32_disabled_before_mlx_import
+
+        require_tf32_disabled_before_mlx_import()
 
 
 def config_for_run(config_path: str | Path | None, run: str | Path):
@@ -49,8 +59,10 @@ def evaluate_stage(run: str | Path, *, suite: str, split: str, data_root: str | 
     config = config_for_run(config_path, run)
     if device is not None:
         config = dataclasses.replace(config, runtime=dataclasses.replace(config.runtime, device=device))
+    mode = execution or "rows"
+    validate_development_evaluation_scope(config.model.family, suite, split, mode)
     resolved = resolve_experiment_config(config)
-    configure_runtime(config.runtime.device, config.runtime.mps_fallback)
+    _configure_runtime(config, resolved)
     resolved.validate_runtime_available()
 
     rows, _manifest, manifest_hash = load_verified_split(data_root, suite, split)
@@ -70,7 +82,6 @@ def evaluate_stage(run: str | Path, *, suite: str, split: str, data_root: str | 
         checkpoint, device=runtime_device, tokenizer=tokenizer, expected_marker_map=markers)
     selected_temperature = checkpoint_meta["calibration"].get("temperature", 1.0) if temperature is None else temperature
     model.head.temperature = selected_temperature
-    mode = execution or "rows"
     predictor = resolved.create_predictor(model, tokenizer, markers,
                                           temperature=selected_temperature,
                                           execution_mode=mode)
@@ -112,8 +123,10 @@ def locked_evaluation_stage(run: str | Path, *, selection: str | Path,
     config = config_for_run(config_path, run)
     if device is not None:
         config = dataclasses.replace(config, runtime=dataclasses.replace(config.runtime, device=device))
+    if config.model.family != "gemma3_text" or config.backend.id != "torch":
+        raise ValueError("locked evaluation is restricted to the pinned Gemma 3 Torch family")
     resolved = resolve_experiment_config(config)
-    configure_runtime(config.runtime.device, config.runtime.mps_fallback)
+    _configure_runtime(config, resolved)
     resolved.validate_runtime_available()
 
     def load_test(suite: str):

@@ -10,7 +10,7 @@ import tempfile
 from typing import Any
 
 from ..infrastructure.network import use_system_ssl
-from ..models.specs import GEMMA3_TEXT
+from ..models.specs import GEMMA3_TEXT, GEMMA4_E2B
 
 SEMANTIC_ROLES = GEMMA3_TEXT.marker_roles
 UNUSED_TOKEN = re.compile(r"<unused(\d+)>")
@@ -52,6 +52,79 @@ def _architecture(config: Any) -> tuple[dict[str, Any], dict[str, tuple[Any, Any
     expected.update({"global_layer_indices": [5, 11, 17, 23], "rope_local_theta": 10000.0, "rope_global_theta": 1000000.0})
     mismatches = {key: (value, actual.get(key)) for key, value in expected.items() if actual.get(key) != value}
     return actual, mismatches
+
+
+def _gemma4_architecture(config: Any) -> tuple[dict[str, Any], dict[str, tuple[Any, Any]]]:
+    text = getattr(config, "text_config", None)
+    if isinstance(text, dict):
+        text = type("TextConfig", (), text)()
+    if text is None:
+        text = config
+    expected = {
+        "model_type": "gemma4_text",
+        "hidden_size": 1536,
+        "num_hidden_layers": 35,
+        "num_attention_heads": 8,
+        "num_key_value_heads": 1,
+        "head_dim": 256,
+        "intermediate_size": 6144,
+        "global_head_dim": 512,
+        "vocab_size": 262144,
+        "max_position_embeddings": 131072,
+        "sliding_window": 512,
+        "per_layer_input_dim": 256,
+        "vocab_size_per_layer_input": 262144,
+        "num_kv_shared_layers": 20,
+        "global_layer_indices": [4, 9, 14, 19, 24, 29, 34],
+    }
+    layer_types = getattr(text, "layer_types", None) or []
+    global_indices = [i for i, layer in enumerate(layer_types)
+                      if layer in {"full_attention", "global_attention"}]
+    actual = {}
+    for key in expected:
+        if key == "global_layer_indices":
+            actual[key] = global_indices
+        elif key == "head_dim":
+            actual[key] = _gemma4_layer_config(text, 0, key)
+        elif key == "num_key_value_heads":
+            actual[key] = _gemma4_layer_config(text, 0, key)
+        elif key == "global_head_dim":
+            actual[key] = (_gemma4_layer_config(text, global_indices[0], "head_dim")
+                           if global_indices else None)
+        else:
+            try:
+                actual[key] = getattr(text, key, None)
+            except Exception:
+                actual[key] = None
+    differences = [right - left for left, right in zip(global_indices, global_indices[1:])]
+    actual["sliding_window_pattern"] = (differences[0] if differences and len(set(differences)) == 1
+                                        else None)
+    expected["sliding_window_pattern"] = 5
+    # Transformers releases expose PLE and shared KV options under these
+    # configuration names; do not accept a config with omitted architecture facts.
+    aliases = {
+        "per_layer_input_dim": ("hidden_size_per_layer_input", "per_layer_input_dim", "per_layer_input_size"),
+        "vocab_size_per_layer_input": ("vocab_size_per_layer_input", "per_layer_input_vocab_size"),
+        "num_kv_shared_layers": ("num_kv_shared_layers", "num_key_value_shared_layers"),
+    }
+    for field, names in aliases.items():
+        actual[field] = next((getattr(text, name) for name in names
+                              if getattr(text, name, None) is not None), None)
+    mismatches = {key: (value, actual.get(key)) for key, value in expected.items()
+                  if actual.get(key) != value}
+    return actual, mismatches
+
+
+def _gemma4_layer_config(config: Any, index: int, key: str) -> Any:
+    """Read heterogeneous Gemma attention facts from the explicit layer config."""
+    try:
+        config_value = config.per_layer_config[index]
+        return getattr(config_value, key, None)
+    except (AttributeError, KeyError, IndexError, TypeError):
+        try:
+            return getattr(config, key, None)
+        except Exception:
+            return None
 
 
 def _special_ids(tokenizer: Any, vocabulary: dict[str, int]) -> set[int]:
@@ -114,8 +187,8 @@ def inspect_model(config: Any, output_root: str = "runs") -> dict[str, Any]:
     try:
         from ..configuration.resolved import resolve_experiment_config
         resolved = resolve_experiment_config(config)
-        if resolved.model.family.family_id != "gemma3_text":
-            raise ValueError("diagnose model is only defined for the Gemma 3 text family")
+        if resolved.model.family.family_id not in {"gemma3_text", GEMMA4_E2B.family_id}:
+            raise ValueError("diagnose model is not defined for this model family")
     except ValueError as exc:
         return {"status": "failed", "error": str(exc)}
     try:
@@ -128,7 +201,9 @@ def inspect_model(config: Any, output_root: str = "runs") -> dict[str, Any]:
         gated = any(word in message.lower() for word in ("gated", "401", "403", "access", "token"))
         return {"status": "blocked" if gated else "failed", "error": f"{type(exc).__name__}: {message}"}
 
-    architecture, mismatches = _architecture(model_config)
+    gemma4 = resolved.model.family == GEMMA4_E2B
+    architecture, mismatches = (_gemma4_architecture(model_config) if gemma4
+                                else _architecture(model_config))
     facts: dict[str, Any] = {
         "model": config.model.name,
         "revision": config.model.revision,
@@ -143,12 +218,14 @@ def inspect_model(config: Any, output_root: str = "runs") -> dict[str, Any]:
         "embedding_inspection": "deferred: weights are intentionally not downloaded by diagnose model",
     }
     if facts["model_type"] != config.model.expected_model_type or mismatches:
-        return {"status": "failed", "error": "expected Gemma 3 architecture did not match", "facts": facts, "mismatches": mismatches}
-    vocab_size = int(getattr(model_config, "vocab_size", 0))
+        return {"status": "failed", "error": "expected model architecture did not match", "facts": facts, "mismatches": mismatches}
+    nested = getattr(model_config, "text_config", None) if gemma4 else None
+    vocab_size = int(getattr(nested or model_config, "vocab_size", 0))
     markers, errors = _discover_markers(tokenizer, config.model.marker_ids, vocab_size)
     if errors:
         return {"status": "failed", "error": "marker verification failed; no artifact written", "facts": facts, "errors": errors, "markers": markers}
     facts["markers"] = markers
     facts["status"] = "verified"
-    _atomic_json(pathlib.Path(output_root) / "reference" / "model-marker-map.json", facts)
+    artifact_name = "gemma4-e2b-marker-map.json" if gemma4 else "model-marker-map.json"
+    _atomic_json(pathlib.Path(output_root) / "reference" / artifact_name, facts)
     return facts

@@ -10,7 +10,8 @@ from typing import Any
 
 from .config import ExperimentConfig
 from ..models.registry import DEFAULT_MODEL_REGISTRY, ModelRegistry, ResolvedModel
-from ..models.specs import BackendCapability
+from ..models.policy import (MODEL_POLICIES, auto_device_requires_probe,
+                             validate_model_policy)
 from ..training.schedule import TrainingSchedule
 
 SUPPORTED_PROTOCOLS = frozenset({("kev-decision-v7", 1)})
@@ -21,15 +22,20 @@ def scientific_recipe(config: ExperimentConfig) -> dict[str, Any]:
     training = dataclasses.asdict(config.training)
     for operational in ("seed", "max_steps", "save_every"):
         training.pop(operational, None)
+    model = {
+        "family": config.model.family,
+        "name": config.model.name,
+        "revision": config.model.revision,
+        "expected_model_type": config.model.expected_model_type,
+        "marker_ids": config.model.marker_ids,
+    }
+    model_policy = MODEL_POLICIES.get(config.model.family)
+    if model_policy is not None and model_policy.source_weights_dtype is not None:
+        model.update(source_weights_dtype=model_policy.source_weights_dtype,
+                     compute_dtype=config.training.dtype)
     return {
         "protocol": dataclasses.asdict(config.protocol),
-        "model": {
-            "family": config.model.family,
-            "name": config.model.name,
-            "revision": config.model.revision,
-            "expected_model_type": config.model.expected_model_type,
-            "marker_ids": config.model.marker_ids,
-        },
+        "model": model,
         "training": training,
         "execution_mode": config.runtime.execution_mode,
         "representation_version": 1,
@@ -48,13 +54,21 @@ class ResolvedExperimentConfig:
     recipe: dict[str, Any]
     recipe_sha256: str
 
-    def select_device(self) -> str:
+    def select_device(self, requested: str | None = None) -> str:
         """Resolve ``auto`` only to a device the selected backend supports."""
-        return self.model.select_device(self.config.runtime.device)
+        selected = self.model.select_device(
+            self.config.runtime.device if requested is None else requested)
+        validate_model_policy(self.config, self.model, effective_device=selected)
+        return selected
 
     def validate_runtime_available(self) -> None:
         """Fail explicit unavailable accelerator requests before downloading weights."""
-        self.model.select_device(self.config.runtime.device)
+        self.select_device()
+
+    def validate_policy_before_data_access(self) -> None:
+        """Probe auto only when a supported policy combination depends on device."""
+        if auto_device_requires_probe(self.config):
+            self.select_device()
 
     def seed_rng(self, seed: int | None = None) -> None:
         """Seed backend-owned global RNGs before tokenizer/model construction."""
@@ -66,7 +80,7 @@ class ResolvedExperimentConfig:
                      seed: int | None = None) -> object:
         """Construct through the selected backend after validating the pair."""
         self.validate_runtime_available()
-        return self.model.create_model(
+        arguments = dict(
             model_name=self.config.model.name,
             revision=self.config.model.revision,
             temperature=temperature,
@@ -76,6 +90,9 @@ class ResolvedExperimentConfig:
                                     if gradient_checkpointing is None else gradient_checkpointing),
             seed=seed,
         )
+        if self.config.model.family == "gemma4_e2b_text":
+            arguments["compute_dtype"] = self.config.training.dtype
+        return self.model.create_model(**arguments)
 
     def load_tokenizer(self):
         return self.model.load_tokenizer(self.config.model.name, self.config.model.revision)
@@ -104,11 +121,16 @@ class ResolvedExperimentConfig:
             temperature=temperature, execution_mode=execution_mode)
 
     def load_checkpoint(self, directory, *, device="cpu", tokenizer=None,
-                        expected_marker_map=None, attn_implementation=None):
-        return self.model.load_checkpoint(
-            directory, config=self.config, device=device, tokenizer=tokenizer,
+                        expected_marker_map=None, backbone_loader=None,
+                        attn_implementation=None):
+        arguments = dict(
+            config=self.config, device=device, tokenizer=tokenizer,
             expected_marker_map=expected_marker_map,
+            backbone_loader=backbone_loader,
             attn_implementation=attn_implementation)
+        if self.config.model.family == "gemma4_e2b_text":
+            arguments["compute_dtype"] = self.config.training.dtype
+        return self.model.load_checkpoint(directory, **arguments)
 
     def save_checkpoint(self, model: object, directory, metadata: dict, tokenizer=None):
         return self.model.save_checkpoint(model, directory, metadata, tokenizer)
@@ -153,6 +175,7 @@ class ResolvedExperimentConfig:
             operational_controls["output_path"] = output_path
         return {
             "study_id": self.config.experiment_id,
+            "model_output_id": self.model.output_model_id,
             "protocol": dataclasses.asdict(self.config.protocol),
             "model_family": self.model.family.family_id,
             "family_runtime": type(self.model.family_runtime).__name__,
@@ -180,14 +203,6 @@ def resolve_experiment_config(config: ExperimentConfig, *,
     if (config.model.marker_ids is not None
             and set(config.model.marker_ids) != set(resolved_model.family.marker_roles)):
         raise ValueError("model marker ID roles do not match the selected model family")
-    capabilities = resolved_model.backend.capabilities
-    selected_device = config.runtime.device
-    if selected_device == "auto":
-        selected_device = "cpu"
-    device_capability = {"cpu": BackendCapability.CPU, "mps": BackendCapability.MPS}.get(selected_device)
-    if device_capability is None or device_capability not in capabilities:
-        raise ValueError(f"backend {config.backend.id} does not support runtime device {selected_device!r}")
-    if config.training.dtype == "bf16" and selected_device != "mps":
-        raise ValueError("bf16 training currently requires runtime.device=mps")
+    validate_model_policy(config, resolved_model)
     recipe = scientific_recipe(config)
     return ResolvedExperimentConfig(config, resolved_model, recipe, _recipe_digest(recipe))

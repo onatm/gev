@@ -35,6 +35,8 @@ class TorchPredictor:
         device = next(self.model.parameters()).device
         if device.type == "mps":
             torch.mps.synchronize()
+        elif device.type == "cuda":
+            torch.cuda.synchronize(device)
         started = time.perf_counter()
         with torch.no_grad():
             # PointerHead applies this temperature in eval mode.  Do not pass
@@ -43,6 +45,8 @@ class TorchPredictor:
                       else self.model.forward_one(encoded))
         if device.type == "mps":
             torch.mps.synchronize()
+        elif device.type == "cuda":
+            torch.cuda.synchronize(device)
         latency = (time.perf_counter() - started) * 1000
         probabilities, logits, raw_logits = {}, {}, {}
         for qid, question, values in zip(record["questions"], record["questions"].values(), served):

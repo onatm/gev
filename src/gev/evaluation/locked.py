@@ -25,6 +25,11 @@ NIGHT2_STEPS = 429
 FULL_V7_SOURCE_RECORDS = 12576
 FULL_V7_PROCESSED_RECORDS = 25152
 FULL_V7_STEPS = 3144
+LOCKED_FAMILY = "gemma3_text"
+LOCKED_BACKEND = "torch"
+LOCKED_BASE = {"name": "google/gemma-3-1b-pt",
+               "revision": "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29",
+               "type": "gemma3_text"}
 
 
 def _now() -> str:
@@ -114,6 +119,23 @@ def _training_lineage(metadata: dict) -> str:
     raise ValueError("checkpoint lacks a verified full v7 or full night2 training lineage")
 
 
+def _require_locked_gemma3_identity(metadata: dict) -> None:
+    identity = metadata.get("identity", {})
+    base = identity.get("base", {})
+    if (identity.get("family") != LOCKED_FAMILY or identity.get("backend") != LOCKED_BACKEND
+            or any(base.get(key) != value for key, value in LOCKED_BASE.items())):
+        raise ValueError("locked registration requires the pinned Gemma 3 Torch base identity")
+    saved = metadata.get("training", {}).get("config", {})
+    if saved:
+        model, backend = saved.get("model", {}), saved.get("backend", {})
+        if (model.get("family", LOCKED_FAMILY) != LOCKED_FAMILY
+                or model.get("name", LOCKED_BASE["name"]) != LOCKED_BASE["name"]
+                or model.get("revision", LOCKED_BASE["revision"]) != LOCKED_BASE["revision"]
+                or model.get("expected_model_type", LOCKED_BASE["type"]) != LOCKED_BASE["type"]
+                or backend.get("id", LOCKED_BACKEND) != LOCKED_BACKEND):
+            raise ValueError("locked training config does not match the pinned Gemma 3 Torch base")
+
+
 def _temperature(selection: dict, checkpoint_meta: dict | None) -> float:
     value = selection.get("temperature", 1.0)
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
@@ -149,6 +171,7 @@ def _validate_selection(selection: dict, suites: tuple[str, ...], actual_fingerp
     if actual_fingerprint is not None and selection["model_fingerprint"] != actual_fingerprint:
         raise ValueError("selection model fingerprint does not match checkpoint weights")
     if checkpoint_meta is not None:
+        _require_locked_gemma3_identity(checkpoint_meta)
         lineage = checkpoint_meta["lineage"]
         continuation = lineage.get("continuation", {})
         if (lineage.get("diagnostic_smoke_init") or lineage.get("smoke_only") or
@@ -293,6 +316,7 @@ def register_candidate(*, run: str | Path, study: str | Path, out: str | Path) -
         raise FileExistsError(f"refusing to overwrite selection: {destination}")
     checkpoint = _checkpoint(run)
     _, metadata = _actual_checkpoint_fingerprint(checkpoint)
+    _require_locked_gemma3_identity(metadata)
     lineage = _training_lineage(metadata)
     study_path = Path(study).resolve(); study_value = json.loads(study_path.read_text(encoding="utf-8"))
     promotion = study_value.get("promotion")

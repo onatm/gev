@@ -8,6 +8,20 @@ from gev.application import evaluation as stages
 from gev.configuration.config import load_config
 
 
+def test_gemma4_evaluation_rejects_calibration_and_packed_before_data_access(monkeypatch, tmp_path):
+    config = load_config("configs/gemma4-e2b-mlx-bf16.toml")
+    monkeypatch.setattr(stages, "config_for_run", lambda *_: config)
+    monkeypatch.setattr(stages, "load_verified_split",
+                        lambda *_args, **_kwargs: pytest.fail("split loaded before Gemma 4 policy check"))
+    for suite, split, execution, message in (
+            ("decision-v7", "calibration", None, "development-only"),
+            ("decision-v7", "development", "packed", "rows-only"),
+            ("transfer-v4", "development", None, "decision-v7")):
+        with pytest.raises(ValueError, match=message):
+            stages.evaluate_stage("run", suite=suite, split=split, data_root="unused",
+                                  output=tmp_path / split, execution=execution)
+
+
 def test_evaluate_stage_uses_raw_t1_and_verified_non_test_split(monkeypatch, tmp_path):
     import hashlib
     from dataclasses import asdict

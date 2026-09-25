@@ -21,11 +21,13 @@ class FakeModel:
     def __init__(self):
         self.head = SimpleNamespace(temperature=1.0)
         self.seen_labels = None
+        self.grad_enabled_during_probs = None
 
     def eval(self):
         return self
 
     def probs(self, encoded):
+        self.grad_enabled_during_probs = torch.is_grad_enabled()
         self.seen_labels = encoded["labels"]
         return [torch.softmax(torch.arange(len(options), dtype=torch.float32) / self.head.temperature, dim=0)
                 for options in encoded["opt_idx"]]
@@ -59,6 +61,7 @@ def test_predict_request_accepts_unlabeled_noul_choice_and_score_and_maps_option
                              branch_cap=1024, packed_cap=2048, temperature=2.0)
 
     assert model.seen_labels == [None, None, None]
+    assert model.grad_enabled_during_probs is False
     assert result["inference_temperature"] == 2.0
     assert [item["id"] for item in result["questions"]] == ["truth-id", "choice-id", "score-id"]
     assert result["questions"][0]["winner"] == "true"

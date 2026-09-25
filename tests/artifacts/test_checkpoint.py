@@ -17,7 +17,7 @@ def _metadata():
     config = _config()
     from gev.configuration.resolved import resolve_experiment_config
     recipe = resolve_experiment_config(config).recipe
-    return {"model_name": "tiny", "model_revision": "0" * 40, "base_model_type": "gemma3_text", "model_family": "gemma3_text", "backend": "torch", "protocol": asdict(config.protocol), "scientific_recipe": recipe, "scientific_recipe_sha256": hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(), "resolved_config": {"resolved_config": asdict(config), "study_id": config.experiment_id}, "marker_ids": {"state": 6, "question": 7, "option_start": 8, "option_end": 9, "decide": 10}, "marker_strings": {"state": "<unused0>", "question": "<unused1>", "option_start": "<unused2>", "option_end": "<unused3>", "decide": "<unused4>"}, "head_width": 256, "lora": {"r": 16, "alpha": 32, "dropout": .05, "targets": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]}, "dtype": "fp32", "state_cap": 384, "branch_cap": 1024, "packed_cap": 2048, "representation_version": 1, "training": {"complete": False}}
+    return {"model_name": "tiny", "model_revision": "0" * 40, "base_model_type": "gemma3_text", "model_family": "gemma3_text", "model_output_id": "gev-gemma3-1b", "backend": "torch", "protocol": asdict(config.protocol), "scientific_recipe": recipe, "scientific_recipe_sha256": hashlib.sha256(json.dumps(recipe, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(), "resolved_config": {"resolved_config": asdict(config), "study_id": config.experiment_id}, "marker_ids": {"state": 6, "question": 7, "option_start": 8, "option_end": 9, "decide": 10}, "marker_strings": {"state": "<unused0>", "question": "<unused1>", "option_start": "<unused2>", "option_end": "<unused3>", "decide": "<unused4>"}, "head_width": 256, "lora": {"r": 16, "alpha": 32, "dropout": .05, "targets": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]}, "dtype": "fp32", "state_cap": 384, "branch_cap": 1024, "packed_cap": 2048, "representation_version": 1, "training": {"complete": False}}
 
 
 def test_checkpoint_roundtrip_and_strict_head(tmp_path):
@@ -60,6 +60,27 @@ def test_checkpoint_manifest_describes_tensor_hashes_and_shapes(tmp_path):
     metadata["calibration"].update(temperature=1.75, fit={"suite": "decision-v7"})
     (path / "manifest.json").write_text(json.dumps(metadata), encoding="utf-8")
     assert checkpoint_fingerprint(path) == fingerprint
+
+
+def test_output_model_id_is_independent_of_base_and_does_not_change_legacy_fingerprint(tmp_path):
+    from gev.artifacts.checkpoint_identity import MANIFEST_FILENAME, checkpoint_fingerprint
+
+    path = save_checkpoint(build_tiny_model(layers=6, hidden_size=32), tmp_path / "ck", _metadata())
+    manifest_path = path / MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["identity"]["model_output_id"] == "gev-gemma3-1b"
+    assert manifest["identity"]["model_output_id"] != manifest["identity"]["base"]["name"]
+    fingerprint = checkpoint_fingerprint(path)
+    manifest["identity"]["model_output_id"] = "gev-other-candidate"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert checkpoint_fingerprint(path) == fingerprint
+
+    del manifest["identity"]["model_output_id"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    loaded, _ = load_checkpoint(
+        path, config=_config(), backbone_loader=lambda *_: build_tiny_model(
+            layers=6, hidden_size=32).decoder.base_model.model)
+    assert loaded is not None
 
 
 @pytest.mark.parametrize("version", [2, True, 1.0])

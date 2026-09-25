@@ -71,7 +71,7 @@ def test_precision_rejects_unresolved_backend_before_model_or_data_access(tmp_pa
     result = check_precision(config, tmp_path / "precision.json", run="missing-run",
                              data_root=str(tmp_path / "no-data"))
     assert result["status"] == "failed"
-    assert "unknown model backend" in result["error"]
+    assert "does not implement model family" in result["error"]
 
 
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS is unavailable")

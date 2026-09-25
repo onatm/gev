@@ -194,3 +194,26 @@ def test_failed_train_child_records_failure_and_returns_nonzero(tmp_path, monkey
     assert result["trials"][0]["exit_code"] == 9
     assert "ValueError: child failed" in result["trials"][0]["output_excerpt"]
     assert not (tmp_path / "study" / "seed-0").exists()
+
+
+def test_gemma4_study_uses_only_development_evaluation_and_promotion(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(study_runner, "plan", lambda *args, **kwargs: {
+        "smoke_child": False,
+        "selection_rule": "completed decision-v7 development macro NLL",
+        "model_family": "gemma4_e2b_text", "backend": "mlx",
+        "trials": [{"seed": 0, "steps": 3144}],
+    })
+    monkeypatch.setattr(study_runner, "run_child", _fake_child_process(calls))
+
+    result = study_runner.run("configs/gemma4-e2b-mlx-bf16.toml", seeds=(0,), data="data",
+                              out=tmp_path / "gemma4-study")
+    commands = [command[3] for command in calls]
+    evaluations = [command for command in calls if command[3] == "evaluate"]
+
+    assert commands == ["train", "evaluate"]
+    assert evaluations[0][evaluations[0].index("--suite") + 1] == "decision-v7"
+    assert evaluations[0][evaluations[0].index("--split") + 1] == "development"
+    assert result["promotion"]["selected_seed"] == 0
+    assert set(result["aggregate"]) == {"development"}
+    assert set(result["trials"][0]["reports"]) == {"development"}

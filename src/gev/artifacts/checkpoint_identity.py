@@ -42,6 +42,10 @@ def read_checkpoint_manifest(directory: str | Path) -> dict[str, Any]:
         raise ValueError("checkpoint manifest family is invalid")
     if not isinstance(identity["backend"], str) or not identity["backend"]:
         raise ValueError("checkpoint manifest backend is invalid")
+    if ("model_output_id" in identity
+            and (not isinstance(identity["model_output_id"], str)
+                 or not identity["model_output_id"])):
+        raise ValueError("checkpoint manifest output model ID is invalid")
     if (not isinstance(base, dict)
             or any(not isinstance(base.get(k), str) or not base[k] for k in ("name", "revision", "type"))
             or not re.fullmatch(r"[0-9a-f]{40}", str(base.get("revision", "")))):
@@ -95,6 +99,11 @@ def read_checkpoint_manifest(directory: str | Path) -> dict[str, Any]:
                or any(isinstance(dim, bool) or not isinstance(dim, int) or dim < 0 for dim in shape)
                for name, shape in shapes.items()):
             raise ValueError(f"checkpoint {logical_name} tensor shapes are invalid")
+        if "dtypes" in descriptor and (
+                not isinstance(descriptor["dtypes"], dict)
+                or set(descriptor["dtypes"]) != set(shapes)
+                or any(not isinstance(dtype, str) or not dtype for dtype in descriptor["dtypes"].values())):
+            raise ValueError(f"checkpoint {logical_name} tensor dtypes are invalid")
         path = directory / filename
         if not path.is_file() or _sha256(path) != digest:
             raise ValueError(f"checkpoint {logical_name} tensor hash mismatch")

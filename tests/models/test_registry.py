@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from dataclasses import replace
 
@@ -31,15 +34,59 @@ def test_default_registry_resolves_torch_gemma3_text_composition():
     assert {BackendCapability.AUTOGRAD, BackendCapability.CAUSAL_LM,
             BackendCapability.LORA_ADAPTERS} <= resolved.backend.capabilities
     assert {BackendCapability.CPU, BackendCapability.MPS} <= resolved.backend.capabilities
+    assert BackendCapability.CUDA in resolved.backend.capabilities
+    assert resolved.output_model_id == "gev-gemma3-1b"
     assert ROLES == GEMMA3_TEXT.marker_roles
     assert GemmaRowModel.__name__ == "GemmaRowModel"
     assert PointerHead.__name__ == "PointerHead"
 
 
+def test_default_registry_resolves_mlx_gemma4_composition():
+    from gev.models.specs import GEMMA4_E2B
+
+    resolved = resolve_model("gemma4_e2b_text", "mlx")
+    assert resolved.family == GEMMA4_E2B
+    assert not {
+        BackendCapability.MLX_GPU, BackendCapability.BF16_SOURCE_WEIGHTS
+    } & GEMMA4_E2B.required_backend_capabilities
+    assert resolved.backend.backend_id == "mlx"
+    assert resolved.backend.capabilities >= GEMMA4_E2B.required_backend_capabilities
+    assert resolved.family_runtime.family_id == GEMMA4_E2B.family_id
+    assert resolved.output_model_id == "gev-gemma4-e2b"
+    assert resolved.output_model_id != "google/gemma-4-E2B"
+
+
+def test_models_lock_keeps_gemma3_and_gemma4_as_symmetric_model_entries():
+    lock = json.loads(Path("models.lock.json").read_text(encoding="utf-8"))
+    assert "model" not in lock and "additional_models" not in lock
+    entries = {entry["output_model_id"]: entry for entry in lock["models"]}
+    assert set(entries) == {"gev-gemma3-1b", "gev-gemma4-e2b"}
+    gemma3, gemma4 = entries["gev-gemma3-1b"], entries["gev-gemma4-e2b"]
+    assert (gemma3["model"], gemma3["revision"], gemma3["expected_parameter_count"]) == (
+        "google/gemma-3-1b-pt", "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29", 999885952)
+    assert (gemma4["model"], gemma4["revision"], gemma4["source_weights_dtype"]) == (
+        "google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f", "bf16")
+    assert "compute_dtype" not in gemma4
+    assert {backend["backend"] for backend in gemma4["backend_matrix"]} == {"torch", "mlx"}
+    implemented = {
+        (entry["backend"], device, dtype)
+        for entry in gemma4["backend_matrix"]
+        for device in entry["devices"]
+        for dtype in entry["compute_dtypes"]
+    }
+    from gev.models.policy import GEMMA4_POLICY
+    assert implemented == GEMMA4_POLICY.implemented
+    assert gemma4["expected_text_tensor_count"] == 600
+    assert gemma4["expected_text_serialized_parameter_count"] == 4_647_449_891
+    assert gemma4["expected_text_parameter_count"] == 4_628_569_344
+    assert gemma3["output_model_id"] != gemma3["model"]
+    assert gemma4["output_model_id"] != gemma4["model"]
+
+
 @pytest.mark.parametrize(
     ("family", "backend", "message"),
-    [("gemma4_text", "torch", "unknown model family"),
-     ("gemma3_text", "mlx", "unknown model backend")],
+    [("unknown_family", "torch", "unknown model family"),
+     ("gemma3_text", "mlx", "does not implement model family")],
 )
 def test_registry_rejects_unregistered_components(family, backend, message):
     with pytest.raises(ValueError, match=message):
@@ -118,6 +165,35 @@ def test_registry_composes_a_synthetic_family_with_its_own_backend_factory():
     assert predictor_spec["contract"]["encoder"].__self__ is family_runtime
     with pytest.raises(ValueError, match="train_profiling"):
         resolved_config.profile_train(0, 1, "profile-output")
+
+
+def test_torch_device_selection_prefers_cuda_then_mps_then_cpu(monkeypatch):
+    import torch
+    backend = resolve_model("gemma3_text", "torch").backend
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert backend.select_device("auto") == "cuda"
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert backend.select_device("auto") == "mps"
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    assert backend.select_device("auto") == "cpu"
+    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
+        backend.select_device("cuda")
+
+
+def test_torch_registry_constructs_tiny_gemma4_text_composition():
+    from transformers import Gemma4TextModel
+    from gev.backends.torch.gemma4 import Gemma4RowModel, _tiny_config
+
+    config = load_config("configs/gemma4-e2b-mlx-bf16.toml")
+    config = replace(config,
+                     backend=BackendConfig("torch"),
+                     runtime=replace(config.runtime, device="cpu"))
+    resolved = resolve_experiment_config(config)
+    tiny_backbone = Gemma4TextModel(_tiny_config())
+    model = resolved.create_model(backbone=tiny_backbone)
+    assert isinstance(model, Gemma4RowModel)
+    assert model.compute_dtype == "bf16"
 
 
 def test_registry_rejects_unsupported_architecture_pair():

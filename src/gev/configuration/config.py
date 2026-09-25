@@ -149,8 +149,8 @@ def load_config(path: str | pathlib.Path) -> ExperimentConfig:
         raise ConfigError("training.epochs must be in [1, 100]")
     if isinstance(training["learning_rate"], bool) or not isinstance(training["learning_rate"], (int, float)) or not math.isfinite(training["learning_rate"]) or not 0 < training["learning_rate"] <= 1:
         raise ConfigError("training.learning_rate must be finite and in (0, 1]")
-    if training["dtype"] not in {"fp32", "bf16"}:
-        raise ConfigError("training.dtype must be fp32 or bf16")
+    if not isinstance(training["dtype"], str):
+        raise ConfigError("training.dtype must be a string")
     if isinstance(training["context_length"], bool) or not isinstance(training["context_length"], int) or not 1 <= training["context_length"] <= 32768:
         raise ConfigError("training.context_length must be in [1, 32768]")
     for name, low, high in (("state_cap", 1, 32768), ("branch_cap", 1, 32768), ("packed_cap", 1, 32768)):
@@ -177,20 +177,20 @@ def load_config(path: str | pathlib.Path) -> ExperimentConfig:
         raise ConfigError("training.save_every must be positive")
     if training.get("state_cap", 384) > training["context_length"]:
         raise ConfigError("training.state_cap must not exceed context_length")
-    if training["dtype"] == "bf16" and runtime["device"] != "mps":
-        raise ConfigError("training.dtype=bf16 requires runtime.device=mps")
-    if runtime["device"] not in {"auto", "cpu", "mps"}:
-        raise ConfigError("runtime.device must be auto, cpu, or mps")
+    if not isinstance(runtime["device"], str):
+        raise ConfigError("runtime.device must be a string")
     if not isinstance(runtime["mps_fallback"], bool):
         raise ConfigError("runtime.mps_fallback must be boolean")
     if not isinstance(runtime["output_root"], str) or not runtime["output_root"]:
         raise ConfigError("runtime.output_root must be non-empty")
-    if runtime.get("attn_implementation", "eager") not in {"eager", "sdpa"}:
+    if (not isinstance(runtime.get("attn_implementation", "eager"), str)
+            or runtime.get("attn_implementation", "eager") not in {"eager", "sdpa"}):
         raise ConfigError("runtime.attn_implementation must be eager or sdpa")
     for name in ("gradient_checkpointing", "empty_cache"):
         if not isinstance(runtime.get(name, False), bool):
             raise ConfigError(f"runtime.{name} must be boolean")
-    if runtime.get("execution_mode", "rows") not in {"rows", "packed"}:
+    if (not isinstance(runtime.get("execution_mode", "rows"), str)
+            or runtime.get("execution_mode", "rows") not in {"rows", "packed"}):
         raise ConfigError("runtime.execution_mode must be rows or packed")
     defaults = {"state_cap": 384, "branch_cap": 1024, "packed_cap": 2048,
                 "logical_batch": 8, "microbatch": 1, "weight_decay": .01,
