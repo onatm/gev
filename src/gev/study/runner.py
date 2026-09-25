@@ -21,6 +21,7 @@ from ..configuration.config import load_config
 from ..data.access import load_verified_split
 from ..data.suites import REQUIRED_FILE_HASHES
 from ..configuration.resolved import resolve_experiment_config
+from ..models.policy import development_only_family
 from .config import write_seed_config
 from .process import run_child
 from ..training.batching import variant_count_for_request
@@ -63,12 +64,17 @@ def plan(config_path: str | Path, *, seeds=(0, 1, 2), data="data", smoke=False) 
         raise ValueError("seeds must be unique")
     config = load_config(config_path)
     resolved = resolve_experiment_config(config)
+    resolved.validate_policy_before_data_access()
     root = Path(data)
+    development_only = development_only_family(resolved.model.family.family_id)
     train = None
     verified_splits = {}
     try:
         is_child = (root / "manifest.json").exists() and json.loads((root / "manifest.json").read_text()).get("smoke_only")
-        splits = (("decision-v7", "train"), ("decision-v7", "development")) if is_child else (("decision-v7", "train"), ("decision-v7", "calibration"), ("decision-v7", "development"), ("transfer-v4", "development"))
+        splits = ((("decision-v7", "train"), ("decision-v7", "development"))
+                  if is_child or development_only else
+                  (("decision-v7", "train"), ("decision-v7", "calibration"),
+                   ("decision-v7", "development"), ("transfer-v4", "development")))
         for suite, split in splits:
             verified_splits[f"{suite}:{split}"] = _verified(root, suite, split)
         train = verified_splits["decision-v7:train"][0]
@@ -93,6 +99,11 @@ def plan(config_path: str | Path, *, seeds=(0, 1, 2), data="data", smoke=False) 
     if root.joinpath("manifest.json").exists() and manifest.get("smoke_only"):
         files = {"decision-v7": {split: {"expected_sha256": info["sha256"], "present_sha256": info["sha256"], "records": info["records"]}
                                   for split, info in manifest["files"].items()}}
+    elif development_only:
+        files = {"decision-v7": {
+            split: {"expected_sha256": REQUIRED_FILE_HASHES["decision-v7"][split],
+                    "present_sha256": _file_sha(root / "decision-v7" / f"{split}.jsonl")}
+            for split in ("train", "development")}}
     else:
         files = {suite: {split: {"expected_sha256": digest, "present_sha256": _file_sha((root / suite / f"{split}.jsonl"))}
                         for split, digest in values.items() if split in allowed_splits}
@@ -101,17 +112,20 @@ def plan(config_path: str | Path, *, seeds=(0, 1, 2), data="data", smoke=False) 
             "scientific_recipe": recipe, "resolved_config": dataclasses.asdict(config),
             "study_id": config.experiment_id, "protocol": dataclasses.asdict(config.protocol),
             "model_family": resolved.model.family.family_id,
+            "model_output_id": resolved.model.output_model_id,
             "backend": resolved.model.backend.backend_id,
             "kev_sha": KEV_SHA, "reference_identities": REFERENCE_IDENTITIES,
             "model": {"name": config.model.name, "revision": config.model.revision,
                       "family": resolved.model.family.family_id, "backend": resolved.model.backend.backend_id,
+                      "output_model_id": resolved.model.output_model_id,
                       "dtype": config.training.dtype,
                       "device": config.runtime.device, "attention": config.runtime.attn_implementation},
             "data": files, "seeds": list(seeds), "trials": actual,
             "recipe": {"epochs": config.training.epochs, "logical_batch": config.training.logical_batch,
                        "microbatch": config.training.microbatch, "p_none_pair": config.training.p_none_pair,
                        "smoke": smoke},
-            "selection_rule": "completed transfer-clean micro accuracy; lower transfer Brier; dev macro NLL",
+            "selection_rule": ("completed decision-v7 development macro NLL" if development_only
+                               else "completed transfer-clean micro accuracy; lower transfer Brier; dev macro NLL"),
             "no_test_loading": True, "smoke_child": bool(root.joinpath("manifest.json").exists() and manifest.get("smoke_only")),
             "runner": "sequential isolated gev train/eval child processes"}
 
@@ -175,6 +189,7 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
                "recent_stage": None, "log_path": None}
     planned_steps = {trial["seed"]: trial["steps"] for trial in result["trials"]}
     base_config = load_config(config_path)
+    development_only = development_only_family(base_config.model.family)
     training_config = base_config.training
     result.update(status="running", trials=[])
 
@@ -294,10 +309,11 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
                 if max_steps is not None: train_cmd += ["--max-steps", str(max_steps)]
                 stages = [execute("train", train_cmd)]
                 if stages[-1]["outcome"] == "completed":
-                    for name, suite in (("calibration", "decision-v7"),
-                                        ("development", "decision-v7"),
-                                        ("transfer", "transfer-v4")):
-                        split = "calibration" if name == "calibration" else "development"
+                    evaluations = (("development", "decision-v7", "development"),) if development_only else (
+                        ("calibration", "decision-v7", "calibration"),
+                        ("development", "decision-v7", "development"),
+                        ("transfer", "transfer-v4", "development"))
+                    for name, suite, split in evaluations:
                         eval_cmd = [sys.executable, "-m", "gev", "evaluate", str(trial),
                                     "--suite", suite, "--split", split,
                                     "--data", data, "--temperature", "1", "--out", str(trial / name)]
@@ -305,7 +321,8 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
                         stages.append(stage_result)
                         if stage_result["outcome"] == "failed":
                             break
-                    if all(stage["outcome"] == "completed" for stage in stages):
+                    if (not development_only
+                            and all(stage["outcome"] == "completed" for stage in stages)):
                         calibration_cmd = [sys.executable, "-m", "gev", "calibrate", "--run",
                                            str(trial / "calibration"), "--protocol", "kev-screening",
                                            "--out", str(trial / "calibration" / "calibration.json")]
@@ -328,10 +345,11 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
             training_metrics = {}
             metrics_path = trial / "training_metrics.json"
             if metrics_path.exists(): training_metrics = json.loads(metrics_path.read_text())
+            report_names = ("development",) if development_only else ("calibration", "development", "transfer")
             report_values = [json.loads((trial / name / "report.json").read_text()) for name in
-                             ("calibration", "development", "transfer")
+                             report_names
                              if (trial / name / "report.json").exists()]
-            reports_complete = len(report_values) == 3 and all(
+            reports_complete = len(report_values) == len(report_names) and all(
                 t.get("coverage", {}).get("rejected_records", 1) == 0 and
                 t.get("coverage", {}).get("truncated_records", 1) == 0 and
                 t.get("coverage", {}).get("evaluated_records") == t.get("coverage", {}).get("requested_records") and
@@ -344,7 +362,7 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
                             "legacy_existing_run": legacy, "path": str(trial)}
             if not legacy:
                 reports = {}
-                for name in ("calibration", "development", "transfer"):
+                for name in report_names:
                     report_path = trial / name / "report.json"
                     if report_path.exists(): reports[name] = _report_summary(json.loads(report_path.read_text()))
                 trial_result["reports"] = reports
@@ -392,17 +410,22 @@ def run(config_path: str | Path, *, seeds=(0, 1, 2), data="data", out="runs/stud
         result["status"] = "failed"
     else:
         result["status"] = "completed" if all(t.get("completed") for t in trials) else "diagnostic"
-    eligible = [t for t in trials if t.get("eligible") and t.get("reports", {}).get("transfer", {}).get("clean")]
+    eligible = [t for t in trials if t.get("eligible") and
+                (t.get("reports", {}).get("development", {}).get("clean") if development_only
+                 else t.get("reports", {}).get("transfer", {}).get("clean"))]
     def dev_macro_nll(trial):
         tasks = trial["reports"].get("development", {}).get("tasks", {})
         values = [value["nll"] for name, value in tasks.items() if not name.startswith("unknowable_")]
         return statistics.fmean(values) if values else float("inf")
-    eligible.sort(key=lambda t: (-t["reports"]["transfer"]["clean"]["acc"],
-                                t["reports"]["transfer"]["clean"]["brier"], dev_macro_nll(t)))
+    if development_only:
+        eligible.sort(key=dev_macro_nll)
+    else:
+        eligible.sort(key=lambda t: (-t["reports"]["transfer"]["clean"]["acc"],
+                                    t["reports"]["transfer"]["clean"]["brier"], dev_macro_nll(t)))
     result["promotion"] = {"selected_seed": eligible[0]["seed"] if eligible else None,
                             "rule": result["selection_rule"], "eligible_seeds": [t["seed"] for t in eligible]}
     result["aggregate"] = {}
-    for name in ("development", "transfer"):
+    for name in (("development",) if development_only else ("development", "transfer")):
         values = [t["reports"][name]["clean"] for t in eligible
                   if t.get("reports", {}).get(name, {}).get("clean")]
         if values:

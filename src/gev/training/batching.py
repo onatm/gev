@@ -16,8 +16,9 @@ class Variant:
 
 
 def physical_token_count(encoding: dict) -> int:
-    """Tokens consumed by row-mode execution (state is repeated per question)."""
-    return encoding["state_length"] + sum(len(row["ids"]) for row in rows_of(encoding)[2])
+    """Tokens processed by row mode, including the repeated state for every question."""
+    state_length = encoding["state_length"]
+    return sum(state_length + len(row["ids"]) for row in rows_of(encoding)[2])
 
 def shuffled_requests(requests: list[dict], seed: int) -> list[dict]:
     result = list(requests)

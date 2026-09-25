@@ -32,23 +32,25 @@ class MarkerMap:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any], tokenizer: Any | None = None,
-                  *, expected_revision: str | None = None) -> "MarkerMap":
-        roles = value.get("roles", value.get("markers"))
+                  *, expected_revision: str | None = None,
+                  roles: tuple[str, ...] = ROLES) -> "MarkerMap":
+        role_names = roles
+        role_entries = value.get("roles", value.get("markers"))
         revision = value.get("tokenizer_revision", value.get("revision"))
-        if roles is None or revision is None or value.get("bos", False) is not False:
+        if role_entries is None or revision is None or value.get("bos", False) is not False:
             raise MarkerError("marker artifact has unknown or missing fields")
-        if not isinstance(roles, dict) or set(roles) != set(ROLES):
+        if not isinstance(role_entries, dict) or set(role_entries) != set(role_names):
             raise MarkerError("marker artifact must contain exactly five semantic roles")
         ids, strings = {}, {}
-        for role in ROLES:
-            entry = roles[role]
+        for role in role_names:
+            entry = role_entries[role]
             if not isinstance(entry, dict) or set(entry) not in ({"string", "id"}, {"token", "id"}):
                 raise MarkerError(f"invalid marker entry for {role}")
             ident = entry["id"]
             if isinstance(ident, bool) or not isinstance(ident, int) or ident < 0:
                 raise MarkerError(f"invalid marker id for {role}")
             ids[role], strings[role] = ident, entry.get("string", entry.get("token"))
-        if len(set(ids.values())) != len(ROLES) or not isinstance(revision, str):
+        if len(set(ids.values())) != len(role_names) or not isinstance(revision, str):
             raise MarkerError("marker IDs must be distinct and BOS must be false")
         if expected_revision is not None and revision != expected_revision:
             raise MarkerError("marker artifact tokenizer revision mismatch")
@@ -58,7 +60,7 @@ class MarkerMap:
         if tokenizer is not None:
             vocab = tokenizer.get_vocab()
             size = max(vocab.values(), default=-1) + 1
-            for role in ROLES:
+            for role in role_names:
                 if strings[role] not in vocab or ids[role] >= size or vocab[strings[role]] != ids[role]:
                     raise MarkerError(f"marker {role} is not the verified tokenizer token")
                 encoded = tokenizer(strings[role], add_special_tokens=False).input_ids
@@ -70,8 +72,10 @@ class MarkerMap:
         return cls(ids, strings, revision, False, value.get("tokenizer_sha256"))
 
     @classmethod
-    def load(cls, path: str | Path, tokenizer: Any | None = None) -> "MarkerMap":
-        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")), tokenizer)
+    def load(cls, path: str | Path, tokenizer: Any | None = None, *,
+             roles: tuple[str, ...] = ROLES) -> "MarkerMap":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")),
+                             tokenizer, roles=roles)
 
 
 def _user_tokens(tokenizer: Any, text: str, marker_strings: tuple[str, ...] = ()) -> list[int]:

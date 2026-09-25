@@ -7,11 +7,20 @@ import math
 from pathlib import Path
 
 from ..artifacts.checkpoint_identity import read_checkpoint_manifest
-from ..backends.torch.environment import configure_runtime
 from ..configuration.resolved import resolve_experiment_config
+from ..backends.torch.environment import configure_runtime
 from ..domain.api_request import api_request
 from ..domain.representation import to_record
 from .evaluation import config_for_run
+
+
+def _configure_runtime(config, resolved) -> None:
+    if config.backend.id == "torch":
+        configure_runtime(config.runtime.device, config.runtime.mps_fallback)
+    elif config.backend.id == "mlx":
+        from ..backends.mlx.qualification import require_tf32_disabled_before_mlx_import
+
+        require_tf32_disabled_before_mlx_import()
 
 
 def predict_request(request: dict, model, tokenizer, markers, *, encoder,
@@ -25,16 +34,25 @@ def predict_request(request: dict, model, tokenizer, markers, *, encoder,
                       branch_cap=branch_cap, packed_cap=packed_cap)
     model.eval()
     model.head.temperature = float(temperature)
-    import torch
-
-    with torch.no_grad():
+    if getattr(model, "backend_id", None) == "mlx":
+        # MLX evaluates eagerly/lazily without a persistent autograd tape outside
+        # value_and_grad; do not import or enter a Torch context for this backend.
         probabilities = model.probs(encoded)
+    else:
+        import torch
+
+        with torch.no_grad():
+            probabilities = model.probs(encoded)
     if len(probabilities) != len(record["questions"]):
         raise ValueError("model returned a different number of questions than the request")
 
     results = []
     for question, values in zip(record["questions"], probabilities, strict=True):
-        scores = [float(value) for value in values.detach().cpu().tolist()]
+        if hasattr(values, "detach"):
+            values = values.detach().cpu().tolist()
+        elif hasattr(values, "tolist"):
+            values = values.tolist()
+        scores = [float(value) for value in values]
         if len(scores) != len(question["keys"]):
             raise ValueError(f"model returned an invalid option count for question {question['qid']!r}")
         if any(not math.isfinite(score) or score < 0 for score in scores):
@@ -59,7 +77,7 @@ def predict_stage(run: str | Path, request: dict, *, config_path: str | Path | N
     if device is not None:
         config = dataclasses.replace(config, runtime=dataclasses.replace(config.runtime, device=device))
     resolved = resolve_experiment_config(config)
-    configure_runtime(config.runtime.device, config.runtime.mps_fallback)
+    _configure_runtime(config, resolved)
     resolved.validate_runtime_available()
     checkpoint = Path(run) / "checkpoint" if (Path(run) / "checkpoint").exists() else Path(run)
     metadata = read_checkpoint_manifest(checkpoint)

@@ -30,6 +30,12 @@ def handle_diagnose(args) -> int:
         if args.tiny or args.probe:
             if args.tiny and args.config:
                 raise SystemExit("--tiny and --config are mutually exclusive")
+            if args.probe and args.config:
+                configured = load_cli_config(args.config)
+                if configured.backend.id == "mlx":
+                    result = _probe_mlx(configured, args.device, data=args.data, output=args.out)
+                    print(json.dumps(result, indent=2, sort_keys=True))
+                    return 0 if result["status"] == "passed" else 2
             from ..backends.torch.gemma3 import check_model
             config_path = None if args.tiny else (args.config or "configs/gemma3-1b-v7.toml")
             result = check_model(tiny=args.tiny, config_path=config_path, device=args.device)
@@ -55,6 +61,45 @@ def handle_diagnose(args) -> int:
     if action == "execution":
         return _execution(args)
     raise ValueError(f"unknown diagnose action: {action}")
+
+
+def _probe_mlx(config, device, *, data="data", output=None):
+    """Run the single pinned FP32 compute qualification on development data."""
+    import dataclasses
+    from ..backends.mlx.qualification import (
+        require_tf32_disabled_before_mlx_import, run_base_qualification)
+
+    try:
+        # This must precede resolve.validate_runtime_available(), which imports MLX.
+        require_tf32_disabled_before_mlx_import()
+        if device is not None:
+            config = dataclasses.replace(
+                config, runtime=dataclasses.replace(config.runtime, device=device))
+        from ..configuration.resolved import resolve_experiment_config
+
+        resolved = resolve_experiment_config(config)
+        resolved.validate_runtime_available()
+        resolved.seed_rng()
+        tokenizer = resolved.load_tokenizer()
+        markers = resolved.load_markers(tokenizer)
+        result = run_base_qualification(
+            model_name=config.model.name, revision=config.model.revision,
+            data_root=data, resolved=resolved, tokenizer=tokenizer, markers=markers,
+            repo_root=Path(__file__).resolve().parents[3])
+        if output is not None:
+            destination = Path(output)
+            if destination.exists():
+                raise FileExistsError(f"refusing to overwrite qualification receipt: {destination}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(f".{destination.name}.tmp")
+            temporary.write_text(json.dumps(result, indent=2, sort_keys=True,
+                                            allow_nan=False) + "\n", encoding="utf-8")
+            temporary.replace(destination)
+        return result
+    except Exception as exc:
+        return {"status": "failed", "protocol": "mlx-gemma4-fp32-qualification",
+                "model": config.model.name, "revision": config.model.revision,
+                "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _execution(args) -> int:
