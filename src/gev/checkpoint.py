@@ -15,7 +15,11 @@ served with MLX and vice versa. The frozen base weights are never stored.
 from __future__ import annotations
 
 import json
+import ssl
 from pathlib import Path
+
+import httpx
+import truststore
 
 from . import __version__
 from .config import Config, from_dict
@@ -104,7 +108,8 @@ def model_card(metadata: dict, reports: dict[str, dict]) -> str:
 def push(checkpoint: str | Path, repo_id: str, *, private: bool = True,
          reports: list[str | Path] = ()) -> str:
     """Upload a checkpoint directory to the Hub, generating a model card if none exists."""
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, set_client_factory
+    from huggingface_hub.utils._http import hf_request_event_hook
 
     directory = resolve(checkpoint)
     metadata = read_metadata(directory)
@@ -115,6 +120,12 @@ def push(checkpoint: str | Path, repo_id: str, *, private: bool = True,
             report = json.loads(Path(path).read_text(encoding="utf-8"))
             loaded[f"{report['suite']}/{report['split']}"] = report
         card.write_text(model_card(metadata, loaded), encoding="utf-8")
+    set_client_factory(lambda: httpx.Client(
+        verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+        event_hooks={"request": [hf_request_event_hook]},
+        follow_redirects=True,
+        timeout=None,
+    ))
     api = HfApi()
     api.create_repo(repo_id, private=private, exist_ok=True)
     return api.upload_folder(repo_id=repo_id, folder_path=str(directory),
