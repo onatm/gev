@@ -49,7 +49,11 @@ The response includes `questions.route.answer`, `questions.route.probabilities` 
 
 ## Evaluation
 
-Clean-question scores from the saved reports. Accuracy is at raw T=1 (temperature scaling does not change the winning answer); Brier and ECE are lower-is-better. The served columns use the saved temperature **T=1.6245**. A dash means calibrated metrics were not recorded for that split.
+Clean-question scores from the saved reports. Accuracy is at raw T=1 (temperature scaling does not change the winning answer); Brier and ECE are lower-is-better. A dash means calibrated metrics were not recorded for that split.
+
+<!-- gev:eval -->
+
+The served columns use the saved temperature **T=1.6245**.
 
 | Suite / split | Clean n | Accuracy | Brier raw | Brier served | ECE raw | ECE served |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -57,6 +61,8 @@ Clean-question scores from the saved reports. Accuracy is at raw T=1 (temperatur
 | transfer-v4/development | 656 | 0.6113 | 0.4990 | 0.4735 | 0.1163 | 0.0522 |
 | decision-v7/test | 1,200 | 0.8292 | 0.2457 | 0.2336 | 0.0661 | 0.0170 |
 | transfer-v4/test | 656 | 0.6250 | 0.4680 | 0.4491 | 0.1136 | 0.0571 |
+
+<!-- /gev:eval -->
 
 `decision-v7` contains held-out questions from the training source families; `transfer-v4` contains new sources and held-out policy structures. Development was for model selection; these reports describe seed 0. Temperature was fitted on the separate `decision-v7/calibration` split, not on either test split.
 

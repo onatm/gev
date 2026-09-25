@@ -9,7 +9,7 @@ data.py ──► records.py ──► encoding.py ──► {torch,mlx}_backend
       │                                               ▲
       └────────────► train.py (loop, schedule, resume)┘
                      evaluate.py (Model, evaluate, calibrate, compare) ──► metrics.py
-cli.py: data | train | evaluate | calibrate | compare | predict | push
+cli.py: data | train | evaluate | calibrate | compare | predict | card | push
 ```
 
 | Module | Responsibility |
@@ -23,7 +23,7 @@ cli.py: data | train | evaluate | calibrate | compare | predict | push
 | `train.py` | The backend-neutral loop: logical batches, one-cycle cosine schedule, a JSONL log, `state/` snapshots, and resume. |
 | `evaluate.py` | `Model` (a checkpoint, its runner, tokenizer, and temperature), suite evaluation, temperature calibration, and paired comparison. |
 | `metrics.py` | Kev metrics: accuracy, NLL, Brier, ECE, selective coverage, AURC, contrastive flips, temperature fit, and a paired cluster bootstrap. |
-| `checkpoint.py` | The checkpoint layout, `gev.json` metadata, and Hub `push`/`download` with a generated model card. |
+| `checkpoint.py` | The checkpoint layout, `gev.json` metadata, refreshing the generated regions of hand-written model cards, and Hub `push`/`download`. |
 
 ## Design choices
 

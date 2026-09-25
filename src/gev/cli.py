@@ -1,4 +1,4 @@
-"""``gev`` command line: data, train, evaluate, calibrate, compare, predict, push."""
+"""``gev`` command line: data, train, evaluate, calibrate, compare, predict, card, push."""
 
 from __future__ import annotations
 
@@ -64,11 +64,19 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--backend", choices=config_module.BACKENDS)
     predict.add_argument("--device", choices=DEVICES)
 
-    push = commands.add_parser("push", help="upload a checkpoint to the Hugging Face Hub")
+    card = commands.add_parser("card", help="refresh a model card's metadata and eval table from a run")
+    card.add_argument("run", help="run or checkpoint directory")
+    card.add_argument("--card", required=True, help="e.g. docs/models/cards/gev-e2b.md")
+    card.add_argument("--report", action="append", default=[],
+                      help="evaluation report.json (default: the run's eval-*/report.json except calibration)")
+    card.add_argument("--check", action="store_true", help="fail if the card is out of date instead of writing it")
+
+    push = commands.add_parser("push", help="upload a checkpoint and its model card to the Hugging Face Hub")
     push.add_argument("run", help="run or checkpoint directory")
     push.add_argument("--repo", required=True, help="e.g. user/gev-e2b")
+    push.add_argument("--card", required=True, help="model card uploaded as README.md")
+    push.add_argument("--card-only", action="store_true", help="update only the model card of an existing repo")
     push.add_argument("--public", action="store_true")
-    push.add_argument("--report", action="append", default=[], help="evaluation report.json for the model card")
     return parser
 
 
@@ -102,10 +110,16 @@ def run(args: argparse.Namespace):
         from .evaluate import compare
 
         return compare(args.candidate, args.reference, samples=args.samples, seed=args.seed)
+    if args.command == "card":
+        from .checkpoint import update_card
+
+        return {"card": args.card, "changed": update_card(args.run, args.card, reports=args.report,
+                                                          check=args.check)}
     if args.command == "push":
         from .checkpoint import push
 
-        return {"commit": push(args.run, args.repo, private=not args.public, reports=args.report)}
+        return {"commit": push(args.run, args.repo, args.card, private=not args.public,
+                               card_only=args.card_only)}
     raise AssertionError(args.command)
 
 

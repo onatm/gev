@@ -6,10 +6,11 @@ A checkpoint directory is self-describing and backend-neutral::
     adapter_model.safetensors  PEFT LoRA weights (base_model.model.layers.N.<module>.lora_{A,B}.weight)
     pointer.safetensors        pointer head (query/key weight and bias)
     gev.json                   base model + revision, markers, caps, temperature, config
-    README.md                  model card (written by ``gev push`` when absent)
 
 Torch and MLX both read and write this layout, so a model trained on CUDA can be
-served with MLX and vice versa. The frozen base weights are never stored.
+served with MLX and vice versa. The frozen base weights are never stored. Model cards
+are written by hand under ``docs/models/cards/``; ``gev card`` regenerates only their
+``model-index`` metadata and the region between the ``EVAL_MARKERS``.
 """
 
 from __future__ import annotations
@@ -24,12 +25,12 @@ import truststore
 
 from . import __version__
 from .config import Config, from_dict
-from .data import HF_DATASET
+from .data import HF_DATASET, SPLITS
 
 FORMAT = "gev-checkpoint"
 FORMAT_VERSION = 1
 ADAPTER_PREFIX = "base_model.model."
-LICENSES = {"gemma3": "gemma", "gemma4": "apache-2.0"}
+EVAL_MARKERS = ("<!-- gev:eval -->", "<!-- /gev:eval -->")
 
 
 def resolve(path: str | Path) -> Path:
@@ -104,107 +105,82 @@ def _card_reports(paths: list[str | Path], temperature: float) -> dict[str, dict
     return loaded
 
 
-def model_card(metadata: dict, reports: dict[str, dict], *, repo_id: str | None = None) -> str:
-    base, family = metadata["base_model"], metadata["family"]
-    config = metadata["config"]
-    name = config["name"]
-    base_label = "Gemma 4 E2B" if family == "gemma4" else "Gemma 3"
-    repo_id = repo_id or f"YOUR_USERNAME/{name}"
-    temperature = metadata["temperature"]
-    test_reports = {key: report for key, report in reports.items() if report["split"] == "test"}
-    lines = ["---", "language: en", f"base_model: {base}", "base_model_relation: adapter",
-             "library_name: peft", f"license: {LICENSES[family]}",
-             "tags: [gev, decision-model, lora, pointer-head, multiple-choice, calibration]",
-             f"datasets: [{HF_DATASET}]", "metrics: [accuracy, brier_score, expected_calibration_error]"]
-    if test_reports:
-        lines += ["model-index:", f"  - name: {name}", "    results:"]
-        for key, report in test_reports.items():
-            scores = report.get("clean_calibrated", report["clean"])
-            calibration = "as served" if "clean_calibrated" in report else "raw T=1"
-            lines += ["      - task: { type: text-classification, name: typed decision (choice / noul / score) }",
-                      f'        dataset: {{ type: {HF_DATASET}, name: "{key} (clean questions)" }}',
-                      "        metrics:",
-                      f"          - {{ type: accuracy, value: {report['clean']['acc']:.4f} }}",
-                      f'          - {{ type: brier_score, value: {scores["brier"]:.4f}, name: "Brier ({calibration})" }}',
-                      f'          - {{ type: expected_calibration_error, value: {scores["ece"]:.4f}, '
-                      f'name: "ECE ({calibration})" }}']
-    lines += ["---", "", f"# {name} — {base_label} decision model", "",
-              "**State and typed questions in; one answer and a probability distribution per question out.** "
-              "Gev scores the supplied options rather than generating text. It combines a LoRA adapter on "
-              f"[`{base}`](https://huggingface.co/{base}) with a separately trained pointer head.", "",
-              "The pointer head (`pointer.safetensors`) is required: loading the PEFT adapter alone does not "
-              "produce Gev decisions. The Gev package loads the base model, adapter, pointer head, tokenizer "
-              "markers, and serving temperature. Its [source repository](https://github.com/onatm/gev) is "
-              "currently private; access to it is needed to run inference.", ""]
-    if test_reports:
-        for key, label in (("decision-v7/test", "trained-source"), ("transfer-v4/test", "new-source")):
-            if key in test_reports:
-                m = test_reports[key]["clean"]
-                lines.append(f"- **{label.capitalize()} test:** {m['acc']:.1%} accuracy on {m['n']:,} clean questions.")
-        lines.append("")
-    lines += ["## Use", "", "With access to the Gev source, run `uv sync --locked` in its checkout "
-              "(add `--extra mlx` on Apple Silicon). Save this as `request.json`:", "", "```json",
-              '{"state":"Order #1 arrived damaged.","questions":{"route":{"type":"choice",'
-              '"instructions":"Which team handles this?","criteria":{"billing":"Payments",'
-              '"support":"Product issues"}}}}', "```", "", "```bash",
-              f"uv run gev predict {repo_id} --input request.json", "```", "",
-              "The response includes `questions.route.answer`, `questions.route.probabilities` (one per option), "
-              "and the serving temperature. Choice, yes/no (`noul`), and ordinal (`score`) questions are "
-              "supported. A Hugging Face text-generation or PEFT-only pipeline cannot serve this model.", ""]
-    if reports:
-        lines += ["## Evaluation", "", "Clean-question scores from the saved reports. Accuracy is at raw "
-                  "T=1 (temperature scaling does not change the winning answer); Brier and ECE are lower-is-better. "
-                  f"The served columns use the saved temperature **T={temperature:.4f}**. "
-                  "A dash means calibrated metrics were not recorded for that split.", "",
-                  "| Suite / split | Clean n | Accuracy | Brier raw | Brier served | ECE raw | ECE served |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
-        for key, report in reports.items():
-            raw = report["clean"]
-            served = report.get("clean_calibrated")
-            served_brier = f"{served['brier']:.4f}" if served else "-"
-            served_ece = f"{served['ece']:.4f}" if served else "-"
-            lines.append(f"| {key} | {raw['n']:,} | {raw['acc']:.4f} | {raw['brier']:.4f} | "
-                         f"{served_brier} | {raw['ece']:.4f} | {served_ece} |")
-        lines += ["", "`decision-v7` contains held-out questions from the training source families; "
-                  "`transfer-v4` contains new sources and held-out policy structures. Development was for model "
-                  f"selection; these reports describe seed {config['training']['seed']}. Temperature was fitted on "
-                  "the separate `decision-v7/calibration` split, not on either test split.", ""]
-        if reports.get("decision-v7/test", {}).get("_derived_calibration"):
-            lines += ["The decision-v7 test report predates the temperature fit. Its served metrics were "
-                      "computed afterward from saved raw logits, without rerunning inference or fitting on test.", ""]
-    transfer = reports.get("transfer-v4/test", {})
-    if transfer.get("paired_flip") and transfer.get("variants", {}).get("none_present"):
-        flip = transfer["paired_flip"]
-        none = transfer["variants"]["none_present"]
-        lines += ["## Known limits", "", "This is one seed, not a multi-seed study. The new-source test is "
-                  "substantially harder than the trained-source test; evaluate on your own decisions before use.", "",
-                  f"- For changed-answer contrastive pairs, both answers were correct in "
-                  f"{round(flip['both_correct_rate'] * flip['pairs'])}/{flip['pairs']} pairs.",
-                  f"- With a none-of-the-above option present, {round(none['acc'] * none['n'])}/{none['n']} "
-                  "questions were correct.", ""]
-    training = metadata.get("training", {})
-    recipe = config["training"]
-    model = config["model"]
-    lines += ["## Model and provenance", "",
-              f"- Base: `{base}` at revision `{metadata['revision']}`; frozen base weights are not in this repo.",
-              f"- Architecture: LoRA rank {model['lora_rank']}, alpha {model['lora_alpha']} on the text decoder "
-              f"and a {model['pointer_width']}-wide pointer head. Each question is scored independently.",
-              f"- Recipe: seed {recipe['seed']}, {recipe['epochs']} epochs, "
-              f"{training['train_records']:,} training records, "
-              f"{training['steps']:,} steps, {metadata['trained_with']['backend'].upper()}/"
-              f"{metadata['trained_with']['dtype'].upper()}. The checkpoint stores the fitted temperature in `gev.json`.",
-              f"- Training data SHA-256: `{training['train_sha256']}`; each saved evaluation report "
-              "also records its split's SHA-256.",
-              f"- Training suite: [{HF_DATASET}](https://huggingface.co/datasets/{HF_DATASET}) "
-              "(`decision-v7`, pinned and verified by hash).", "",
-              "Training uses option permutation, none-of-the-above and distractor augmentation, and "
-              "contrastive pairs. The architecture follows [Jev's Architecture Unmasked]"
-              "(https://archerhume.com/posts/jevs-architecture-unmasked); the data and evaluation "
-              "protocol are adapted from [Kev](https://github.com/jaredpalmer/kev). "
-              "The detailed run reports and code are in the private Gev repository.", ""]
-    lines += ["## License", "", f"The adapter and pointer head are {LICENSES[family]}; "
-              "check the separately loaded base model and dataset licenses as well.", ""]
-    return "\n".join(lines)
+def discover_reports(run: str | Path) -> list[Path]:
+    """The run's saved ``eval-*/report.json`` files, development before test, calibration excluded."""
+    found = []
+    for path in resolve(run).parent.glob("eval-*/report.json"):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if report["split"] != "calibration":
+            found.append((SPLITS.index(report["split"]), report["suite"], path))
+    return [path for *_, path in sorted(found)]
+
+
+def _model_index(name: str, reports: dict[str, dict]) -> list[str]:
+    tests = {key: report for key, report in reports.items() if report["split"] == "test"}
+    if not tests:
+        return []
+    lines = ["model-index:", f"  - name: {name}", "    results:"]
+    for key, report in tests.items():
+        scores = report.get("clean_calibrated", report["clean"])
+        calibration = "as served" if "clean_calibrated" in report else "raw T=1"
+        lines += ["      - task: { type: text-classification, name: typed decision (choice / noul / score) }",
+                  f'        dataset: {{ type: {HF_DATASET}, name: "{key} (clean questions)" }}',
+                  "        metrics:",
+                  f"          - {{ type: accuracy, value: {report['clean']['acc']:.4f} }}",
+                  f'          - {{ type: brier_score, value: {scores["brier"]:.4f}, name: "Brier ({calibration})" }}',
+                  f'          - {{ type: expected_calibration_error, value: {scores["ece"]:.4f}, '
+                  f'name: "ECE ({calibration})" }}']
+    return lines
+
+
+def _eval_table(reports: dict[str, dict], temperature: float) -> list[str]:
+    lines = [f"The served columns use the saved temperature **T={temperature:.4f}**.", "",
+             "| Suite / split | Clean n | Accuracy | Brier raw | Brier served | ECE raw | ECE served |",
+             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for key, report in reports.items():
+        raw, served = report["clean"], report.get("clean_calibrated")
+        served_brier = f"{served['brier']:.4f}" if served else "-"
+        served_ece = f"{served['ece']:.4f}" if served else "-"
+        lines.append(f"| {key} | {raw['n']:,} | {raw['acc']:.4f} | {raw['brier']:.4f} | "
+                     f"{served_brier} | {raw['ece']:.4f} | {served_ece} |")
+    return lines
+
+
+def render_card(card: str, metadata: dict, reports: dict[str, dict]) -> str:
+    """Regenerate a hand-written card's ``model-index`` and eval table; leave everything else as written."""
+    if not card.startswith("---\n") or "\n---\n" not in card[4:]:
+        raise ValueError("model card has no YAML front matter")
+    front, body = card[4:].split("\n---\n", 1)
+    lines = front.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.startswith("model-index:")), len(lines))
+    end = next((i for i in range(start + 1, len(lines)) if lines[i][:1] not in (" ", "-")), len(lines))
+    lines[start:end] = _model_index(metadata["config"]["name"], reports)
+    open_marker, close_marker = EVAL_MARKERS
+    if body.count(open_marker) != 1 or body.count(close_marker) != 1:
+        raise ValueError(f"model card needs exactly one {open_marker} ... {close_marker} region")
+    before, rest = body.split(open_marker)
+    after = rest.split(close_marker)[1]
+    table = "\n".join(_eval_table(reports, metadata["temperature"]))
+    return f"---\n{chr(10).join(lines)}\n---\n{before}{open_marker}\n\n{table}\n\n{close_marker}{after}"
+
+
+def update_card(run: str | Path, card: str | Path, *, reports: list[str | Path] = (),
+                check: bool = False) -> bool:
+    """Refresh ``card`` from the run's metadata and reports; returns whether it changed.
+
+    With ``check``, a stale card is an error and the file is left untouched.
+    """
+    metadata = read_metadata(run)
+    card = Path(card)
+    text = card.read_text(encoding="utf-8")
+    loaded = _card_reports(list(reports) or discover_reports(run), metadata["temperature"])
+    rendered = render_card(text, metadata, loaded)
+    if rendered == text:
+        return False
+    if check:
+        raise ValueError(f"{card} is out of date; run `gev card {run} --card {card}`")
+    card.write_text(rendered, encoding="utf-8")
+    return True
 
 
 def _prepare_adapter_config(directory: Path) -> None:
@@ -217,19 +193,21 @@ def _prepare_adapter_config(directory: Path) -> None:
             path.write_text(json.dumps(adapter, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def push(checkpoint: str | Path, repo_id: str, *, private: bool = True,
-         reports: list[str | Path] = ()) -> str:
-    """Upload a checkpoint directory to the Hub, generating a model card if none exists."""
-    from huggingface_hub import HfApi, set_client_factory
+def push(checkpoint: str | Path, repo_id: str, card: str | Path, *, private: bool = True,
+         card_only: bool = False) -> str:
+    """Upload a checkpoint and its model card to the Hub in one commit, or only the card."""
+    from huggingface_hub import CommitOperationAdd, HfApi, ModelCard, set_client_factory
     from huggingface_hub.utils._http import hf_request_event_hook
 
     directory = resolve(checkpoint)
-    metadata = read_metadata(directory)
-    card = directory / "README.md"
-    if not card.exists():
-        loaded = _card_reports(reports, metadata["temperature"])
-        card.write_text(model_card(metadata, loaded, repo_id=repo_id), encoding="utf-8")
-    _prepare_adapter_config(directory)
+    read_metadata(directory)
+    card = Path(card)
+    ModelCard(card.read_text(encoding="utf-8"))  # rejects invalid metadata before anything is uploaded
+    operations = [CommitOperationAdd(path_in_repo="README.md", path_or_fileobj=str(card))]
+    if not card_only:
+        _prepare_adapter_config(directory)
+        operations += [CommitOperationAdd(path_in_repo=path.name, path_or_fileobj=str(path))
+                       for path in sorted(directory.iterdir()) if path.suffix in (".json", ".safetensors")]
     set_client_factory(lambda: httpx.Client(
         verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
         event_hooks={"request": [hf_request_event_hook]},
@@ -237,9 +215,10 @@ def push(checkpoint: str | Path, repo_id: str, *, private: bool = True,
         timeout=None,
     ))
     api = HfApi()
-    api.create_repo(repo_id, private=private, exist_ok=True)
-    return api.upload_folder(repo_id=repo_id, folder_path=str(directory),
-                             allow_patterns=["*.json", "*.safetensors", "README.md"]).commit_url
+    if not card_only:
+        api.create_repo(repo_id, private=private, exist_ok=True)
+    message = "Update model card" if card_only else "Upload gev checkpoint"
+    return api.create_commit(repo_id, operations=operations, commit_message=message).commit_url
 
 
 def download(repo_id: str, revision: str | None = None) -> Path:
