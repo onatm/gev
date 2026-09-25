@@ -19,6 +19,8 @@ def _rng_state() -> dict:
     state = {"python": random.getstate(), "torch": torch.get_rng_state()}
     if torch.backends.mps.is_available():
         state["mps"] = torch.mps.get_rng_state()
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
     state["numpy"] = np.random.get_state()
     return state
 
@@ -29,6 +31,10 @@ def _restore_rng(state: dict) -> None:
     torch.set_rng_state(state["torch"])
     if "mps" in state and torch.backends.mps.is_available():
         torch.mps.set_rng_state(state["mps"])
+    if "cuda" in state:
+        if not torch.cuda.is_available():
+            raise RuntimeError("cannot exactly resume a CUDA run without CUDA")
+        torch.cuda.set_rng_state_all(state["cuda"])
     np.random.set_state(state["numpy"])
 
 
@@ -75,6 +81,12 @@ def _optimizer_state_cpu(optimizer):
                 copied[key] = value
         state["state"][parameter_id] = copied
     return state
+
+
+def _optimizer_state_fp32(optimizer) -> bool:
+    floating = [value for state in optimizer.state.values() for value in state.values()
+                if isinstance(value, torch.Tensor) and value.is_floating_point()]
+    return bool(floating) and all(value.dtype == torch.float32 for value in floating)
 
 
 def save_training_state(path: str | Path, *, recipe, model, optimizer, scheduler, rng,
@@ -217,7 +229,9 @@ def optimizer_step(model, variants, config, optimizer, *, device: str,
     for start in range(0, len(variants), config.training.microbatch):
         part = variants[start:start + config.training.microbatch]
         autocast = (torch.autocast(device_type=device, dtype=torch.bfloat16)
-                    if config.training.dtype == "bf16" else contextlib.nullcontext())
+                    if config.training.dtype == "bf16"
+                    and not getattr(model, "native_bf16_compute", False)
+                    else contextlib.nullcontext())
         with autocast:
             logits = (model.forward_packed_batch([variant.encoding for variant in part])
                       if config.runtime.execution_mode == "packed"
@@ -254,7 +268,8 @@ def train(model, schedule: TrainingSchedule, config, output: str | Path, *, sour
     resolved = resolve_experiment_config(config)
     device = resolved.select_device()
     if device == "mps" and not torch.backends.mps.is_available(): raise RuntimeError("MPS requested but unavailable")
-    if config.training.dtype == "bf16" and device != "mps": raise RuntimeError("bf16 training is explicitly supported only on MPS")
+    if (getattr(model, "compute_dtype", config.training.dtype) != config.training.dtype):
+        raise ValueError("model compute dtype does not match the training config")
     model.to(device)
     opt, trainable, head_lr = create_optimizer(model, config)
     full_steps = config.training.epochs * math.ceil(len(requests) / config.training.logical_batch)
@@ -266,7 +281,39 @@ def train(model, schedule: TrainingSchedule, config, output: str | Path, *, sour
                "planned_variant_count": sum(variant_count_for_request(r, seed=config.training.seed, epoch=e, p_none=config.training.p_none, p_none_distract=config.training.p_none_distract, p_distract=config.training.p_distract, p_none_pair=config.training.p_none_pair) for e in range(config.training.epochs) for r in requests),
                "processed_records": 0, "variant_count": 0, "logical_steps": 0, "physical_microbatches": 0,
                "logical_tokens": 0, "physical_tokens": 0, "losses": [], "learning_rates": [], "wall_seconds": 0.0,
-               "device": device, "dtype": config.training.dtype, "master_dtype": "fp32", "execution_mode": config.runtime.execution_mode, "optimizer_betas": list(opt.defaults["betas"]), "full_sched_steps": sched_steps, "complete": True}
+                "device": device, "dtype": config.training.dtype,
+                "compute_dtype": config.training.dtype,
+                "weights_dtype": getattr(model, "compute_dtype", "fp32"),
+                "source_weights_dtype": ("bf16" if config.model.family == "gemma4_e2b_text"
+                                          else "fp32"),
+                "master_dtype": "fp32", "execution_mode": config.runtime.execution_mode,
+                "optimizer_betas": list(opt.defaults["betas"]),
+                "full_sched_steps": sched_steps, "complete": True}
+    gemma4 = config.model.family == "gemma4_e2b_text"
+    source = getattr(model, "source_provenance", None) or {}
+    decoder_dtype = torch.bfloat16 if config.training.dtype == "bf16" else torch.float32
+    frozen = [parameter for parameter in model.backbone.parameters()
+              if not parameter.requires_grad]
+    trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
+    metrics["qualification_checks"] = {
+        "source_inventory_exact": (
+            source.get("model") == config.model.name
+            and source.get("revision") == config.model.revision
+            and source.get("source_weights_dtype") == "bf16"
+            and source.get("compute_dtype") == config.training.dtype
+            and source.get("source_text_tensor_count") == 600
+            and source.get("source_text_parameters") == 4_647_449_891
+            and source.get("effective_text_parameters") == 4_628_569_344
+            and isinstance(source.get("source_name_shape_sha256"), str)
+            and len(source["source_name_shape_sha256"]) == 64),
+        "decoder_compute_dtype": bool(frozen) and all(
+            parameter.dtype == decoder_dtype for parameter in frozen),
+        "fp32_lora_and_pointer": bool(trainable) and all(
+            parameter.dtype == torch.float32 for parameter in trainable),
+        "fp32_optimizer_state": False,
+        "finite_loss_gradients": False,
+        "nonzero_trainable_update": False,
+    } if gemma4 else {}
     start = time.perf_counter()
     if resume_path:
         state = load_training_state(resume_path)
@@ -300,6 +347,9 @@ def train(model, schedule: TrainingSchedule, config, output: str | Path, *, sour
             schedule.batch_cursor = batch_index
             batch = batches[batch_index]
             variants = schedule.variants_for_batch(batch, epoch=epoch)
+            before_trainables = ([parameter.detach().clone() for parameter in trainable]
+                                 if gemma4 and not metrics["qualification_checks"][
+                                     "nonzero_trainable_update"] else [])
             try:
                 loss, microbatches, physical_tokens = optimizer_step(
                     model, variants, config, opt, device=device, scheduler=scheduler,
@@ -309,6 +359,27 @@ def train(model, schedule: TrainingSchedule, config, output: str | Path, *, sour
                     raise FloatingPointError(
                         f"non-finite loss at epoch={epoch} step={metrics['logical_steps'] + 1}") from exc
                 raise
+            if gemma4:
+                checks = metrics["qualification_checks"]
+                checks["finite_loss_gradients"] = True
+                checks["fp32_optimizer_state"] = _optimizer_state_fp32(opt)
+                adapter_changed = any(
+                    "lora_" in name and not torch.equal(before, parameter.detach())
+                    for before, (name, parameter) in zip(
+                        before_trainables,
+                        [(name, parameter) for name, parameter in model.named_parameters()
+                         if parameter.requires_grad]))
+                head_changed = any(
+                    name.startswith("head.") and not torch.equal(before, parameter.detach())
+                    for before, (name, parameter) in zip(
+                        before_trainables,
+                        [(name, parameter) for name, parameter in model.named_parameters()
+                         if parameter.requires_grad]))
+                checks["nonzero_trainable_update"] = adapter_changed and head_changed
+                if not checks["fp32_optimizer_state"]:
+                    raise FloatingPointError("Gemma 4 optimizer floating state must remain FP32")
+                if before_trainables and not checks["nonzero_trainable_update"]:
+                    raise FloatingPointError("Gemma 4 update did not change LoRA and pointer parameters")
             metrics["physical_microbatches"] += microbatches
             metrics["physical_tokens"] += physical_tokens
             metrics["logical_steps"] += 1; metrics["processed_records"] += len(batch); metrics["variant_count"] += len(variants); metrics["logical_tokens"] += sum(len(v.encoding["ids"]) for v in variants); metrics["losses"].append(float(loss.cpu())); metrics["learning_rates"].append([g["lr"] for g in opt.param_groups]); schedule.complete_batch()

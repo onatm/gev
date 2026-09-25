@@ -96,15 +96,15 @@ def load_real_backbone(name: str, revision: str, *, attn_implementation: str = "
     return model
 
 
-def _with_peft(backbone: nn.Module) -> nn.Module:
+def _with_peft(backbone: nn.Module, family=GEMMA3_TEXT) -> nn.Module:
     from peft import LoraConfig, TaskType, get_peft_model
 
     config = LoraConfig(
         task_type=TaskType.FEATURE_EXTRACTION,
-        target_modules=list(_TARGETS),
-        r=GEMMA3_TEXT.lora_rank,
-        lora_alpha=GEMMA3_TEXT.lora_alpha,
-        lora_dropout=GEMMA3_TEXT.lora_dropout,
+        target_modules=list(family.lora_targets),
+        r=family.lora_rank,
+        lora_alpha=family.lora_alpha,
+        lora_dropout=family.lora_dropout,
         bias="none",
     )
     return get_peft_model(backbone, config)
@@ -114,16 +114,18 @@ class GemmaRowModel(nn.Module):
     """Independent state/question rows over a real Gemma decoder."""
 
     def __init__(self, backbone: nn.Module, *, temperature: float = 1.0,
-                 use_peft: bool = True, gradient_checkpointing: bool = False) -> None:
+                 use_peft: bool = True, gradient_checkpointing: bool = False,
+                 family=GEMMA3_TEXT) -> None:
         super().__init__()
         if gradient_checkpointing:
             if not hasattr(backbone, "gradient_checkpointing_enable"):
                 raise TypeError("backbone does not support gradient checkpointing")
             backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        self.backbone = _with_peft(backbone) if use_peft else backbone
+        self.backbone = _with_peft(backbone, family) if use_peft else backbone
         self.backbone.config.use_cache = False
+        self.family = family
         self.head = PointerHead(int(self.backbone.config.hidden_size),
-                                width=GEMMA3_TEXT.pointer_width, temperature=temperature)
+                                width=family.pointer_width, temperature=temperature)
 
     @property
     def decoder(self) -> nn.Module:

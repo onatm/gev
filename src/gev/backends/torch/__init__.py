@@ -1,4 +1,4 @@
-"""Current PyTorch model-construction backend (CPU and MPS)."""
+"""Current PyTorch model-construction backend (CPU, MPS, and CUDA)."""
 
 from __future__ import annotations
 
@@ -17,12 +17,13 @@ class TorchBackend:
         BackendCapability.LORA_ADAPTERS,
         BackendCapability.CPU,
         BackendCapability.MPS,
+        BackendCapability.CUDA,
         BackendCapability.TRAIN_PROFILING,
         BackendCapability.PRECISION_DIAGNOSTICS,
         BackendCapability.EXECUTION_DIAGNOSTICS,
     })
-    families = frozenset({"gemma3_text"})
-    architectures = frozenset({"gemma3_text"})
+    families = frozenset({"gemma3_text", "gemma4_e2b_text"})
+    architectures = frozenset({"gemma3_text", "gemma4"})
 
     def seed_rng(self, seed: int) -> None:
         import torch
@@ -34,7 +35,8 @@ class TorchBackend:
                      temperature: float = 1.0, backbone: object | None = None,
                      attn_implementation: str = "eager",
                      gradient_checkpointing: bool = False,
-                     seed: int | None = None) -> Any:
+                     seed: int | None = None,
+                     compute_dtype: str | None = None) -> Any:
         """Construct a family model using this backend's tensor/autograd stack."""
         if family.family_id not in self.families:
             raise ValueError(f"torch backend does not implement model family: {family.family_id}")
@@ -42,6 +44,24 @@ class TorchBackend:
             raise ValueError(f"torch backend does not implement architecture: {family.architecture}")
         if seed is not None:
             self.seed_rng(seed)
+        if family.family_id == "gemma4_e2b_text":
+            if (model_name, revision) != (
+                "google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+            ):
+                raise ValueError("Torch Gemma 4 requires the pinned google/gemma-4-E2B revision")
+            from .gemma4 import Gemma4RowModel, load_gemma4_backbone
+
+            compute_dtype = "fp32" if compute_dtype is None else compute_dtype
+            loaded = (load_gemma4_backbone(
+                model_name, revision, compute_dtype=compute_dtype,
+                attn_implementation=attn_implementation,
+                gradient_checkpointing=False)
+                if backbone is None else backbone)
+            return Gemma4RowModel(
+                loaded, compute_dtype=compute_dtype, temperature=temperature,
+                use_peft=not loaded.__class__.__module__.startswith("peft."),
+                gradient_checkpointing=gradient_checkpointing)
+
         from .gemma3 import GemmaRowModel, load_real_backbone
 
         if backbone is None:
@@ -55,13 +75,21 @@ class TorchBackend:
         import torch
 
         if requested == "auto":
-            return "mps" if torch.backends.mps.is_available() and BackendCapability.MPS in self.capabilities else "cpu"
+            if torch.cuda.is_available() and BackendCapability.CUDA in self.capabilities:
+                return "cuda"
+            if torch.backends.mps.is_available() and BackendCapability.MPS in self.capabilities:
+                return "mps"
+            return "cpu"
         if requested == "cpu" and BackendCapability.CPU in self.capabilities:
             return "cpu"
         if requested == "mps" and BackendCapability.MPS in self.capabilities:
             if not torch.backends.mps.is_available():
                 raise RuntimeError("runtime.device=mps was requested, but MPS is unavailable; refusing fallback")
             return "mps"
+        if requested == "cuda" and BackendCapability.CUDA in self.capabilities:
+            if not torch.cuda.is_available():
+                raise RuntimeError("runtime.device=cuda was requested, but CUDA is unavailable; refusing fallback")
+            return "cuda"
         raise ValueError(f"torch backend does not support runtime device {requested!r}")
 
     def save_checkpoint(self, model: object, directory, metadata: dict, tokenizer=None):
@@ -71,13 +99,14 @@ class TorchBackend:
 
     def load_checkpoint(self, directory, *, config, device="cpu", tokenizer=None,
                         expected_marker_map=None, backbone_loader=None,
-                        attn_implementation=None):
+                        attn_implementation=None, compute_dtype=None):
         from .checkpoint import load_checkpoint
 
         return load_checkpoint(directory, config=config, device=device, tokenizer=tokenizer,
-                               expected_marker_map=expected_marker_map,
-                               backbone_loader=backbone_loader,
-                               attn_implementation=attn_implementation)
+                                expected_marker_map=expected_marker_map,
+                                backbone_loader=backbone_loader,
+                                attn_implementation=attn_implementation,
+                                compute_dtype=compute_dtype)
 
     def checkpoint_fingerprint(self, directory):
         from .checkpoint import checkpoint_fingerprint
@@ -85,12 +114,16 @@ class TorchBackend:
         return checkpoint_fingerprint(directory)
 
     def trainable_fingerprint(self, model: object) -> str:
-        payload = b"".join(
-            tensor.detach().cpu().contiguous().numpy().tobytes()
-            for name, tensor in sorted(model.state_dict().items())
-            if "lora_" in name or name.startswith("head.")
-        )
-        return hashlib.sha256(payload).hexdigest()
+        if getattr(getattr(model, "family", None), "family_id", None) != "gemma4_e2b_text":
+            payload = b"".join(
+                tensor.detach().cpu().contiguous().numpy().tobytes()
+                for name, tensor in sorted(model.state_dict().items())
+                if "lora_" in name or name.startswith("head.")
+            )
+            return hashlib.sha256(payload).hexdigest()
+        from ...models.qualification import trainable_content_sha256
+
+        return trainable_content_sha256("torch", model)
 
     def create_predictor(self, model: object, tokenizer: object, markers: object, *,
                          state_cap: int, branch_cap: int, packed_cap: int,

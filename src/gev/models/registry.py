@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from ..backends.torch import TorchBackend
+from ..backends.mlx import MlxBackend
 from ..training.schedule import TrainingSchedule
-from .families import Gemma3TextRuntime, ModelFamilyRuntime
-from .specs import BackendCapability, GEMMA3_TEXT, ModelFamilySpec
+from .families import Gemma3TextRuntime, Gemma4E2BTextRuntime, ModelFamilyRuntime
+from .specs import BackendCapability, GEMMA3_TEXT, GEMMA4_E2B, ModelFamilySpec
 
 _BACKEND_OPERATIONS = (
     "create_model", "create_predictor", "select_device", "seed_rng", "save_checkpoint",
@@ -27,6 +28,7 @@ class ModelBackend(Protocol):
                      temperature: float = 1.0, backbone: object | None = None,
                      attn_implementation: str = "eager",
                      gradient_checkpointing: bool = False,
+                     compute_dtype: str | None = None,
                      seed: int | None = None) -> object: ...
 
     def create_predictor(self, model: object, tokenizer: object, markers: object, *,
@@ -42,7 +44,7 @@ class ModelBackend(Protocol):
 
     def load_checkpoint(self, directory, *, config, device="cpu", tokenizer=None,
                         expected_marker_map=None, backbone_loader=None,
-                        attn_implementation=None) -> object: ...
+                        attn_implementation=None, compute_dtype=None) -> object: ...
 
     def checkpoint_fingerprint(self, directory) -> str: ...
 
@@ -55,6 +57,10 @@ class ResolvedModel:
     family: ModelFamilySpec
     backend: ModelBackend
     family_runtime: ModelFamilyRuntime
+
+    @property
+    def output_model_id(self) -> str:
+        return self.family.output_model_id or self.family.family_id
 
     def require_capability(self, capability: BackendCapability) -> None:
         if capability not in self.backend.capabilities:
@@ -76,11 +82,21 @@ class ResolvedModel:
 
     def create_model(self, *, model_name: str, revision: str, temperature: float = 1.0,
                      backbone: object | None = None, attn_implementation: str = "eager",
-                     gradient_checkpointing: bool = False, seed: int | None = None) -> object:
-        return self.backend.create_model(self.family, model_name=model_name,
-                                         revision=revision, temperature=temperature,
-                                         backbone=backbone, attn_implementation=attn_implementation,
-                                         gradient_checkpointing=gradient_checkpointing, seed=seed)
+                     gradient_checkpointing: bool = False, seed: int | None = None,
+                     compute_dtype: str | None = None) -> object:
+        arguments = {
+            "model_name": model_name, "revision": revision,
+            "temperature": temperature, "backbone": backbone,
+            "attn_implementation": attn_implementation,
+            "gradient_checkpointing": gradient_checkpointing, "seed": seed,
+        }
+        # Preserve third-party/synthetic backend signatures; only the Gemma 4
+        # built-in family owns this additional precision argument.
+        if self.family.family_id == "gemma4_e2b_text":
+            arguments["compute_dtype"] = (
+                ("bf16" if self.backend.backend_id == "mlx" else "fp32")
+                if compute_dtype is None else compute_dtype)
+        return self.backend.create_model(self.family, **arguments)
 
     def create_predictor(self, model: object, tokenizer: object, markers: object, *,
                          state_cap: int, branch_cap: int, packed_cap: int,
@@ -101,11 +117,16 @@ class ResolvedModel:
 
     def load_checkpoint(self, directory, *, config, device="cpu", tokenizer=None,
                         expected_marker_map=None, backbone_loader=None,
-                        attn_implementation=None) -> object:
-        return self.backend.load_checkpoint(
-            directory, config=config, device=device, tokenizer=tokenizer,
-            expected_marker_map=expected_marker_map, backbone_loader=backbone_loader,
-            attn_implementation=attn_implementation)
+                        attn_implementation=None, compute_dtype=None) -> object:
+        arguments = {
+            "config": config, "device": device, "tokenizer": tokenizer,
+            "expected_marker_map": expected_marker_map,
+            "backbone_loader": backbone_loader,
+            "attn_implementation": attn_implementation,
+        }
+        if self.family.family_id == "gemma4_e2b_text":
+            arguments["compute_dtype"] = compute_dtype
+        return self.backend.load_checkpoint(directory, **arguments)
 
     def checkpoint_fingerprint(self, directory) -> str:
         return self.backend.checkpoint_fingerprint(directory)
@@ -143,15 +164,17 @@ class ResolvedModel:
 class ModelRegistry:
     """Small explicit registry; unsupported pairings fail before model loading."""
 
-    def __init__(self, *, families: tuple[ModelFamilySpec, ...] = (GEMMA3_TEXT,),
+    def __init__(self, *, families: tuple[ModelFamilySpec, ...] = (GEMMA3_TEXT, GEMMA4_E2B),
                  backends: tuple[ModelBackend, ...] | None = None,
                  family_runtimes: tuple[ModelFamilyRuntime, ...] | None = None) -> None:
         self._families = {family.family_id: family for family in families}
-        active_backends = backends if backends is not None else (TorchBackend(),)
+        active_backends = backends if backends is not None else (TorchBackend(), MlxBackend())
         self._backends = {backend.backend_id: backend for backend in active_backends}
         active_family_runtimes = (family_runtimes if family_runtimes is not None else
-                                  tuple(Gemma3TextRuntime() for family in families
-                                        if family.family_id == GEMMA3_TEXT.family_id))
+                                   tuple(runtime for family in families for runtime in (
+                                       (Gemma3TextRuntime(),) if family.family_id == GEMMA3_TEXT.family_id
+                                       else (Gemma4E2BTextRuntime(),) if family.family_id == GEMMA4_E2B.family_id
+                                       else ())))
         self._family_runtimes = {runtime.family_id: runtime for runtime in active_family_runtimes}
         if (len(self._families) != len(families)
                 or len(self._backends) != len(active_backends)
