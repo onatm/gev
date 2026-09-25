@@ -16,7 +16,7 @@ import mlx.optimizers as optim
 import numpy as np
 from mlx.utils import tree_flatten, tree_map, tree_unflatten
 
-from . import checkpoint
+from . import checkpoint, hub
 from .config import Config
 from .encoding import flatten_rows
 
@@ -90,6 +90,7 @@ def load_decoder(config: Config):
     from huggingface_hub import snapshot_download
     from mlx_lm.utils import _get_classes, load_config
 
+    hub.configure_hub()
     path = Path(snapshot_download(config.model.name, revision=config.model.revision,
                                   allow_patterns=["*.json", "*.safetensors"]))
     model_config = load_config(path)

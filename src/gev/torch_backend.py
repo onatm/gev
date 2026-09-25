@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from . import checkpoint
+from . import checkpoint, hub
 from .config import Config
 from .encoding import flatten_rows
 
@@ -43,6 +43,7 @@ def _gemma4_text_decoder(name: str, revision: str, dtype: torch.dtype, attn_impl
     from huggingface_hub import snapshot_download
     from transformers import AutoConfig, Gemma4TextModel
 
+    hub.configure_hub()
     path = Path(snapshot_download(name, revision=revision, allow_patterns=["config.json", "*.safetensors*"]))
     text_config = AutoConfig.from_pretrained(path).text_config
     text_config._attn_implementation = attn_implementation
@@ -91,6 +92,7 @@ def load_backbone(config: Config) -> nn.Module:
     else:
         from transformers import AutoModelForCausalLM
 
+        hub.configure_hub()
         backbone = AutoModelForCausalLM.from_pretrained(model.name, revision=model.revision, dtype=dtype,
                                                         attn_implementation=config.attn_implementation).model
     backbone.config.use_cache = False

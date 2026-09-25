@@ -5,7 +5,7 @@ import huggingface_hub
 import pytest
 import truststore
 
-from gev import checkpoint
+from gev import checkpoint, hub
 
 
 ROOT = Path(__file__).parents[1]
@@ -71,7 +71,7 @@ def test_push_uploads_checkpoint_and_card_in_one_commit(tmp_path, monkeypatch):
     clients = []
     commits = []
     monkeypatch.setattr(huggingface_hub, "set_client_factory", factories.append)
-    monkeypatch.setattr(checkpoint.httpx, "Client", lambda **kwargs: clients.append(kwargs))
+    monkeypatch.setattr(hub.httpx, "Client", lambda **kwargs: clients.append(kwargs))
 
     class FakeApi:
         def create_repo(self, repo_id, *, private, exist_ok):

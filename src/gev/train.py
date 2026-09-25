@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import checkpoint, data
+from . import checkpoint, data, hub
 from .config import Config
 from .encoding import Markers, encode, token_count
 from .records import materialize
@@ -17,6 +17,7 @@ from .records import materialize
 def load_tokenizer(config: Config):
     from transformers import AutoTokenizer
 
+    hub.configure_hub()
     tokenizer = AutoTokenizer.from_pretrained(config.model.name, revision=config.model.revision)
     return tokenizer, Markers.resolve(tokenizer, config.model.markers)
 

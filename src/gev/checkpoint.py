@@ -17,13 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import ssl
 from pathlib import Path
 
-import httpx
-import truststore
-
 from . import __version__
+from . import hub
 from .config import Config, from_dict
 from .data import HF_DATASET, SPLITS
 
@@ -196,8 +193,7 @@ def _prepare_adapter_config(directory: Path) -> None:
 def push(checkpoint: str | Path, repo_id: str, card: str | Path, *, private: bool = True,
          card_only: bool = False) -> str:
     """Upload a checkpoint and its model card to the Hub in one commit, or only the card."""
-    from huggingface_hub import CommitOperationAdd, HfApi, ModelCard, set_client_factory
-    from huggingface_hub.utils._http import hf_request_event_hook
+    from huggingface_hub import CommitOperationAdd, HfApi, ModelCard
 
     directory = resolve(checkpoint)
     read_metadata(directory)
@@ -208,12 +204,7 @@ def push(checkpoint: str | Path, repo_id: str, card: str | Path, *, private: boo
         _prepare_adapter_config(directory)
         operations += [CommitOperationAdd(path_in_repo=path.name, path_or_fileobj=str(path))
                        for path in sorted(directory.iterdir()) if path.suffix in (".json", ".safetensors")]
-    set_client_factory(lambda: httpx.Client(
-        verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
-        event_hooks={"request": [hf_request_event_hook]},
-        follow_redirects=True,
-        timeout=None,
-    ))
+    hub.configure_hub()
     api = HfApi()
     if not card_only:
         api.create_repo(repo_id, private=private, exist_ok=True)
@@ -224,5 +215,6 @@ def push(checkpoint: str | Path, repo_id: str, card: str | Path, *, private: boo
 def download(repo_id: str, revision: str | None = None) -> Path:
     from huggingface_hub import snapshot_download
 
+    hub.configure_hub()
     return Path(snapshot_download(repo_id, revision=revision,
                                   allow_patterns=["*.json", "*.safetensors", "README.md"]))
