@@ -1,0 +1,95 @@
+{
+  "format": "gev-checkpoint",
+  "format_version": 1,
+  "gev_version": "0.1.0",
+  "base_model": "google/gemma-4-E2B",
+  "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+  "family": "gemma4",
+  "markers": {
+    "state": {
+      "token": "<unused0>",
+      "id": 6
+    },
+    "question": {
+      "token": "<unused1>",
+      "id": 7
+    },
+    "option_start": {
+      "token": "<unused2>",
+      "id": 8
+    },
+    "option_end": {
+      "token": "<unused3>",
+      "id": 9
+    },
+    "decide": {
+      "token": "<unused4>",
+      "id": 10
+    }
+  },
+  "state_cap": 384,
+  "branch_cap": 2048,
+  "temperature": 1.6245047927124707,
+  "trained_with": {
+    "backend": "mlx",
+    "dtype": "bf16"
+  },
+  "config": {
+    "name": "gev-e2b",
+    "model": {
+      "name": "google/gemma-4-E2B",
+      "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+      "family": "gemma4",
+      "markers": [
+        "<unused0>",
+        "<unused1>",
+        "<unused2>",
+        "<unused3>",
+        "<unused4>"
+      ],
+      "lora_rank": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "lora_targets": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
+      "pointer_width": 256
+    },
+    "training": {
+      "seed": 0,
+      "epochs": 2,
+      "learning_rate": 0.0001,
+      "head_learning_rate": null,
+      "weight_decay": 0.01,
+      "logical_batch": 8,
+      "microbatch": 1,
+      "max_steps": null,
+      "save_every": 250,
+      "state_cap": 384,
+      "branch_cap": 2048,
+      "p_none": 0.1,
+      "p_none_distract": 0.12,
+      "p_distract": 0.15,
+      "p_none_pair": 0.25
+    },
+    "backend": "mlx",
+    "device": "auto",
+    "dtype": "bf16",
+    "attn_implementation": "sdpa",
+    "gradient_checkpointing": false
+  },
+  "training": {
+    "steps": 3144,
+    "total_steps": 3144,
+    "complete": true,
+    "seconds": 13010.148587625008,
+    "train_sha256": "7ed5254b5cb5291baefaceb09edf7e13110258211518c8038f4a12c11bd628ad",
+    "train_records": 12576
+  }
+}

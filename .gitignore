@@ -10,7 +10,22 @@ __pycache__/
 /credentials/
 /data/
 /artifacts/
-/runs/
+# Keep the metric and provenance artifacts of the selected Gemma 4 run (its model card is in docs/models/cards).
+# Other runs, per-question rows, resumable state, and weights remain local.
+/runs/*
+!/runs/g4-s0/
+/runs/g4-s0/*
+!/runs/g4-s0/config.json
+!/runs/g4-s0/log.jsonl
+!/runs/g4-s0/checkpoint/
+/runs/g4-s0/checkpoint/*
+!/runs/g4-s0/checkpoint/gev.json
+!/runs/g4-s0/checkpoint/adapter_config.json
+!/runs/g4-s0/eval-*/
+/runs/g4-s0/eval-*/*
+!/runs/g4-s0/eval-*/report.json
+!/runs/g4-s0/eval-cal/calibration.json
+!/runs/g4-s0/eval-test/calibration.json
 /dist/
 *.safetensors
 *.pt

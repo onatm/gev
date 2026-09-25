@@ -1,6 +1,0 @@
-{
-  "repository": "https://github.com/jaredpalmer/kev",
-  "revision": "08ab0b87d27cb5577a3b371ad7ed4e4686b0502b",
-  "url": "https://github.com/jaredpalmer/kev/tree/08ab0b87d27cb5577a3b371ad7ed4e4686b0502b",
-  "purpose": "pinned research reference; not imported as a Gev runtime dependency"
-}

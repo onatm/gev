@@ -1,0 +1,17 @@
+# Gemma 3 1B FP32 example recipe; not the published Gemma 4 run.
+name = "gev-gemma3-1b"
+backend = "torch"
+dtype = "fp32"
+attn_implementation = "eager"
+
+[model]
+family = "gemma3"
+name = "google/gemma-3-1b-pt"
+revision = "fcf18a2a879aab110ca39f8bffbccd5d49d8eb29"
+
+[training]
+seed = 0
+epochs = 2
+learning_rate = 1e-4
+logical_batch = 8
+microbatch = 1

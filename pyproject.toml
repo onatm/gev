@@ -1,16 +1,13 @@
 [project]
 name = "gev"
 version = "0.1.0"
-description = "Gev foundation and reproducible experiment tooling"
+description = "Train, evaluate, and publish Jev-like decision models (LoRA + pointer head) on Gemma"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-  "accelerate>=1.10,<2",
   "huggingface-hub>=1.5,<2",
   "numpy>=2.2,<3",
   "peft==0.21.0",
-  "psutil>=7,<8",
-  "pydantic>=2.11,<3",
   "safetensors>=0.6,<1",
   "torch==2.8.0",
   "transformers==5.17.0",
@@ -19,7 +16,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4,<9"]
-data = ["datasets>=4,<5"]
 mlx = [
   "mlx==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx-lm==0.31.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
