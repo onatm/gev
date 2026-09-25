@@ -41,7 +41,6 @@
     "down_proj"
   ],
   "target_parameters": null,
-  "task_type": null,
   "trainable_token_indices": null,
   "use_bdlora": null,
   "use_dora": false,

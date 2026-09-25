@@ -30,12 +30,12 @@ result, not a three-seed study.
 ## Models
 
 Currently the only reported model is **gev-e2b**, a single Gemma 4 E2B seed-0
-run. The model name links to its results and local checkpoint provenance; a
-public weights URL is not listed here.
+run. Its [model card and weights](https://huggingface.co/onatm/gev-e2b) are on
+Hugging Face; the results and checkpoint provenance are linked below.
 
 | Model | Base | Accuracy: New Sources | Accuracy: Trained Sources | Brier: New Sources ↓ | Backends | Results |
 | --- | --- | ---: | ---: | ---: | --- | --- |
-| [gev-e2b](docs/results/gemma4-e2b-s0.md) | Gemma 4 E2B | 0.611 / 0.625 | 0.797 / 0.829 | 0.499 / 0.468 | MLX (Apple Silicon), PyTorch (CUDA/MPS/CPU) | [Details](docs/results/gemma4-e2b-s0.md) |
+| [gev-e2b](https://huggingface.co/onatm/gev-e2b) | Gemma 4 E2B | 0.611 / 0.625 | 0.797 / 0.829 | 0.499 / 0.468 | MLX (Apple Silicon), PyTorch (CUDA/MPS/CPU) | [Details](docs/results/gemma4-e2b-s0.md) |
 
 Each number is **development / test** at raw temperature 1. “New sources” are
 `transfer-v4` questions from held-out datasets and policy structures; “trained
@@ -246,7 +246,8 @@ uv run gev predict your-hf-user/gev-e2b --input request.json
 
 `push` uploads the checkpoint (PEFT `adapter_config.json` +
 `adapter_model.safetensors`, `pointer.safetensors`, `gev.json`) and generates a
-model card with the base model, license, and the reported metrics. Repositories
+model card with usage, evaluation, limitations, and provenance when no card is
+already present. An existing `checkpoint/README.md` is uploaded as-is. Repositories
 are private unless you pass `--public`. Gemma 4 derivatives are Apache-2.0;
 Gemma 3 derivatives fall under the Gemma terms.
 
@@ -254,7 +255,7 @@ Gemma 3 derivatives fall under the Gemma terms.
 
 `.gitignore` keeps generated data, weights, and resumable state local. For the
 selected `g4-s0` run it allowlists `config.json`, `log.jsonl`,
-`checkpoint/{gev,adapter_config}.json`, five `eval-*/report.json` files, and
+`checkpoint/{gev,adapter_config}.json`, the checkpoint model card, five `eval-*/report.json` files, and
 the calibration fit and derived decision-test calibration JSON. They document
 the MLX recipe, training trace, raw results, and fitted confidence. Per-question
 `rows.jsonl` and all `.safetensors` stay ignored. If a later seed is selected,

@@ -99,6 +99,6 @@ multiple-seed uncertainty nor a matched-backbone ablation is claimed.
   `442be99c882e4cbf7aa21c3d55e00ce5418b19c8f3be78d8323b7599a5b8b4b9`.
   The [adapter configuration](../../runs/g4-s0/checkpoint/adapter_config.json)
   and checkpoint metadata are retained with the reports.
-- The checkpoint and resumable optimizer state remain in the ignored local run.
-  To make the model available for inference elsewhere, publish the weights via
-  `gev push` as described in the [README](../../README.md#publish).
+- The resumable optimizer state remains in the ignored local run. The checkpoint
+  weights are [published on Hugging Face](https://huggingface.co/onatm/gev-e2b);
+  load them with `gev predict onatm/gev-e2b --input request.json`.
