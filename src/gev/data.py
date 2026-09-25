@@ -10,10 +10,13 @@ import hashlib
 import json
 import os
 import random
+import ssl
 import tempfile
 import urllib.request
 from importlib import resources
 from pathlib import Path
+
+import truststore
 
 from .records import validate_request
 
@@ -81,7 +84,8 @@ def fetch(suite: str, split: str, data_root: str | Path = "data") -> Path:
     info = _file_info(manifest(suite)["files"], split)
     url = (f"https://huggingface.co/datasets/{HF_DATASET}/resolve/{HF_REVISION}/"
            f"{SUITES[suite]['path']}/{split}.jsonl")
-    with urllib.request.urlopen(url) as response:  # nosec B310: pinned HTTPS URL
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    with urllib.request.urlopen(url, context=context) as response:  # nosec B310: pinned HTTPS URL
         data = response.read()
     _verify(data, info, f"{suite}/{split}")
     path = Path(data_root) / suite / f"{split}.jsonl"
