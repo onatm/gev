@@ -84,7 +84,7 @@ multiple-seed uncertainty nor a matched-backbone ablation is claimed.
   `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f`; LoRA rank 16, alpha 32,
   dropout 0.05, with a separate 256-wide pointer head. The exact effective
   settings are in `runs/g4-s0/config.json`, rather than inferred from the
-  example PyTorch config in the README.
+  example configs in `configs/`.
 - Train data SHA-256:
   `7ed5254b5cb5291baefaceb09edf7e13110258211518c8038f4a12c11bd628ad`.
   Each evaluation report records its own split's SHA-256 and question count.
