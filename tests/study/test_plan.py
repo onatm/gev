@@ -58,3 +58,38 @@ def test_save_interval_does_not_change_scientific_recipe_identity(tmp_path):
 
     assert plan("configs/gemma3-1b-v7.toml", seeds=(0,), data="data")["config_sha256"] == \
         plan(configured, seeds=(0,), data="data")["config_sha256"]
+
+
+def test_gemma4_plan_verifies_only_train_and_decision_development(monkeypatch, tmp_path):
+    calls = []
+    manifest = {"files": {
+        "train.jsonl": {"records": 10, "sha256": "train-hash"},
+        "development.jsonl": {"records": 4, "sha256": "development-hash"},
+    }}
+
+    def verified(_root, suite, split):
+        calls.append((suite, split))
+        return [], manifest
+
+    monkeypatch.setattr(study_runner, "_verified", verified)
+    result = plan("configs/gemma4-e2b-mlx-bf16.toml", seeds=(0,), data=tmp_path)
+
+    assert calls == [("decision-v7", "train"), ("decision-v7", "development")]
+    assert set(result["data"]) == {"decision-v7"}
+    assert set(result["data"]["decision-v7"]) == {"train", "development"}
+    assert result["selection_rule"] == "completed decision-v7 development macro NLL"
+
+
+def test_plan_rejects_unsupported_auto_device_before_accessing_data(tmp_path, monkeypatch):
+    import torch
+
+    source = Path("configs/gemma3-1b-v7.toml").read_text()
+    path = tmp_path / "bf16-auto.toml"
+    path.write_text(source.replace('dtype = "fp32"', 'dtype = "bf16"'))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    monkeypatch.setattr(study_runner, "_verified",
+                        lambda *_: pytest.fail("data accessed before auto policy validation"))
+
+    with pytest.raises(ValueError, match="torch/cuda/bf16"):
+        plan(path, seeds=(0,), data=tmp_path / "missing-data")

@@ -12,11 +12,29 @@ def test_validate_config(capsys):
     assert '"model_family": "gemma3_text"' in output
 
 
+def test_model_probe_has_one_qualification_protocol_and_base_only_is_not_qualified(
+        monkeypatch, capsys):
+    from types import SimpleNamespace
+    from gev.commands import diagnose as handler
+
+    monkeypatch.setattr(handler, "load_cli_config",
+                        lambda _path: SimpleNamespace(backend=SimpleNamespace(id="mlx")))
+    monkeypatch.setattr(handler, "_probe_mlx",
+                        lambda *_args, **_kwargs: {"status": "base_structure_passed",
+                                                   "inference_qualified": False})
+    assert main(["diagnose", "model", "--probe", "--config",
+                 "configs/gemma4-e2b-mlx-bf16.toml"]) == 2
+    assert '"inference_qualified": false' in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(["diagnose", "model", "--probe", "--config",
+              "configs/gemma4-e2b-mlx-bf16.toml", "--qualification", "v1"])
+
+
 def test_train_rejects_unsupported_backend_before_data_or_model_loading(tmp_path):
     source = open("configs/smoke.toml", encoding="utf-8").read().replace('id = "torch"', 'id = "mlx"')
     config = tmp_path / "unsupported.toml"
     config.write_text(source, encoding="utf-8")
-    with pytest.raises(ValueError, match="unknown model backend"):
+    with pytest.raises(ValueError, match="does not implement model family"):
         main(["train", str(config), "--data", str(tmp_path / "absent-data"),
               "--out", str(tmp_path / "run")])
 
@@ -182,6 +200,14 @@ def test_old_duplicate_cli_names_are_not_registered():
     for command in ("doctor", "eval", "experiment", "continue-training", "eval-locked"):
         with pytest.raises(SystemExit):
             main([command, "--help"])
+
+
+def test_device_options_include_torch_cuda():
+    from gev.commands.parser import build_parser
+
+    args = build_parser().parse_args([
+        "train", "configs/smoke.toml", "--out", "run", "--device", "cuda"])
+    assert args.device == "cuda"
 
 
 def test_cpu_runtime_smoke_is_real():

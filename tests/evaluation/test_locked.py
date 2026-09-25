@@ -20,7 +20,9 @@ def protocol(tmp_path, monkeypatch):
     monkeypatch.setattr(locked, "_manifest_info", lambda suite: manifests[suite])
     study = tmp_path / "locked-result.json"
     study.write_text(json.dumps({"promotion": {"selected_seed": 0}, "trials": []}))
-    meta = {"lineage": {"source_sha256": locked.V7_TRAIN_SHA256,
+    meta = {"identity": {"family": "gemma3_text", "backend": "torch",
+                          "base": dict(locked.LOCKED_BASE)},
+            "lineage": {"source_sha256": locked.V7_TRAIN_SHA256,
                          "manifest_sha256": locked.V7_MANIFEST_SHA256},
             "training": {"metrics": {"complete": True, "logical_steps": 3144,
                                        "processed_records": 25152, "source_count": 12576},
@@ -191,6 +193,20 @@ def test_no_verified_identity_means_no_reservation(protocol):
                           ledger=root / "ledger.jsonl", load_test=lambda _: pytest.fail())
 
 
+def test_locked_gate_rejects_forged_gemma3_study_id_with_gemma4_backend(protocol):
+    root, selection, meta = protocol
+    forged = {**meta, "identity": {"family": "gemma4_e2b_text", "backend": "mlx",
+                                   "base": {"name": "google/gemma-4-E2B",
+                                            "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+                                            "type": "gemma4"}}}
+    with pytest.raises(ValueError, match="pinned Gemma 3 Torch"):
+        locked.run_locked(selection=selection, suites=("decision-v7",), data_root=root,
+                          output=root / "forged-out", ledger=root / "forged-ledger.jsonl",
+                          load_test=lambda _: pytest.fail("test loader must not run"),
+                          checkpoint_meta=forged, model_fingerprint="weights-a")
+    assert not (root / "forged-ledger.jsonl").exists()
+
+
 def test_normal_split_loader_refuses_test(tmp_path):
     from gev.data.access import load_verified_split
     from gev.data.suites import SuiteError
@@ -205,8 +221,8 @@ def _checkpoint_fixture(root, *, seed=0, smoke=False):
     (checkpoint / "pointer.safetensors").write_bytes(b"fixture-pointer")
     meta = {"format": "gev.inference-checkpoint", "version": 1,
         "identity": {"family": "gemma3_text", "backend": "torch",
-            "base": {"name": "fixture", "revision": "f" * 40, "type": "gemma3_text"},
-            "tokenizer": {"revision": "f" * 40},
+            "base": dict(locked.LOCKED_BASE),
+            "tokenizer": {"revision": locked.LOCKED_BASE["revision"]},
             "markers": {"ids": {"state": 1}, "strings": {"state": "s"}, "bos": False},
             "protocol": {"id": "kev-decision-v7", "version": 1},
             "recipe": {"scientific_recipe": {}, "sha256": hashlib.sha256(b"{}").hexdigest()},
@@ -215,7 +231,11 @@ def _checkpoint_fixture(root, *, seed=0, smoke=False):
                     "manifest_sha256": locked.V7_MANIFEST_SHA256},
         "training": {"metrics": {"complete": True, "source_count": 12576,
                                   "processed_records": 25152, "logical_steps": 3144},
-                     "config": {"experiment_id": "gemma3-1b-v7", "training": {
+                      "config": {"experiment_id": "gemma3-1b-v7",
+                          "model": {"family": "gemma3_text", "name": locked.LOCKED_BASE["name"],
+                                    "revision": locked.LOCKED_BASE["revision"],
+                                    "expected_model_type": "gemma3_text"},
+                          "backend": {"id": "torch"}, "training": {
                          "seed": seed, "epochs": 2, "logical_batch": 8,
                          "context_length": 384, "p_none_pair": .25}}},
         "execution": {}, "calibration": {"temperature": 1.0},
@@ -262,6 +282,24 @@ def test_register_rejects_unrelated_checkpoint_before_any_test_path(protocol):
     study.write_text(json.dumps(_study_for(selected)))
     with pytest.raises(ValueError, match="selected trial"):
         locked.register_candidate(run=unrelated, study=study, out=root / "unrelated-selection.json")
+
+
+def test_locked_registration_rejects_gemma4_even_with_forged_v7_run_metadata(protocol):
+    root, _, _ = protocol
+    trial = root / "forged-gemma4"
+    checkpoint, _ = _checkpoint_fixture(trial)
+    manifest_path = checkpoint / "manifest.json"
+    value = json.loads(manifest_path.read_text())
+    value["identity"].update(
+        family="gemma4_e2b_text", backend="mlx",
+        base={"name": "google/gemma-4-E2B",
+              "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f", "type": "gemma4"})
+    value["identity"]["tokenizer"]["revision"] = "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+    manifest_path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="pinned Gemma 3 Torch"):
+        locked.register_candidate(run=trial, study=root / "missing-study.json",
+                                  out=root / "must-not-register.json")
+    assert not (root / "must-not-register.json").exists()
 
 
 def test_nested_smoke_continuation_is_rejected_before_reservation(protocol):
