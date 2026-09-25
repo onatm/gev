@@ -124,7 +124,11 @@ uv run gev data sample --out data/smoke
 uv run gev train configs/smoke.toml --data data/smoke --out runs/smoke --max-steps 20
 ```
 
-The reported `runs/g4-s0` checkpoint completed two epochs and all 3,144 steps.
+The reported `runs/g4-s0` checkpoint completed two epochs and all 3,144 steps
+on this machine: an Apple M4 Max with 64 GB of memory. With MLX/BF16 and
+`microbatch = 1`, it processed 6,800,870 training tokens in 13,010 seconds
+(3 h 37 min), averaging about 523 tokens/s over the recorded training loop
+(roughly 550 tokens/s).
 Use a new directory rather than overwriting that run.
 
 A run directory contains `config.json`, `log.jsonl` (loss, learning rate, tokens,
@@ -144,11 +148,10 @@ for 20 steps, then raise `microbatch` if there is headroom. If memory is short,
 set `gradient_checkpointing = true`: it trades roughly a third more compute for
 much less memory.
 
-Measured on an M1 Max (64 GB), real data, BF16: MLX trains at about 350 tokens/s
-(about 10 s per 8-record step) and Torch on MPS at about 150 tokens/s. The full
-two-epoch recipe is about 3,144 steps and 10M tokens, so it takes roughly 8 hours
-with MLX on that machine. A datacenter GPU should be one to two orders of
-magnitude faster; confirm with `--max-steps 20` before a full run.
+Earlier short-run measurements on an M1 Max (64 GB) were about 350 tokens/s
+with MLX and 150 tokens/s with Torch on MPS; those are not full-run timings.
+Throughput also depends on the seed's token mix and hardware. Confirm GPU
+throughput with `--max-steps 20` before a new full run.
 
 ```bash
 git clone <this repo> && cd gev

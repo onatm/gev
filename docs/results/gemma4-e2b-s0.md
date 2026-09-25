@@ -88,6 +88,11 @@ multiple-seed uncertainty nor a matched-backbone ablation is claimed.
 - Train data SHA-256:
   `7ed5254b5cb5291baefaceb09edf7e13110258211518c8038f4a12c11bd628ad`.
   Each evaluation report records its own split's SHA-256 and question count.
+- Training throughput: the completed MLX/BF16 run on an Apple M4 Max (64 GB),
+  with `microbatch = 1`, recorded 6,800,870 tokens across 3,144 steps in
+  13,010 seconds (3 h 37 min), or about 523 tokens/s over the training loop.
+  Token count comes from `runs/g4-s0/log.jsonl`; elapsed time is recorded in
+  `checkpoint/gev.json`.
 - Checkpoint weight SHA-256 (weights kept out of Git): LoRA adapter
   `a7cab6151e48b5189c47d742f7f30cba64286ddd47a047dfcfa5435d59cb16fc`;
   pointer head
