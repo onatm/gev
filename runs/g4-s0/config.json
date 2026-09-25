@@ -1,0 +1,50 @@
+{
+  "name": "gev-gemma4-e2b",
+  "model": {
+    "name": "google/gemma-4-E2B",
+    "revision": "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f",
+    "family": "gemma4",
+    "markers": [
+      "<unused0>",
+      "<unused1>",
+      "<unused2>",
+      "<unused3>",
+      "<unused4>"
+    ],
+    "lora_rank": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "lora_targets": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "pointer_width": 256
+  },
+  "training": {
+    "seed": 0,
+    "epochs": 2,
+    "learning_rate": 0.0001,
+    "head_learning_rate": null,
+    "weight_decay": 0.01,
+    "logical_batch": 8,
+    "microbatch": 1,
+    "max_steps": null,
+    "save_every": 250,
+    "state_cap": 384,
+    "branch_cap": 2048,
+    "p_none": 0.1,
+    "p_none_distract": 0.12,
+    "p_distract": 0.15,
+    "p_none_pair": 0.25
+  },
+  "backend": "mlx",
+  "device": "auto",
+  "dtype": "bf16",
+  "attn_implementation": "sdpa",
+  "gradient_checkpointing": false
+}
