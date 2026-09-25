@@ -14,6 +14,9 @@ and metric-only reports for
 [transfer development](../../runs/g4-s0/eval-transfer-dev/report.json),
 [decision test](../../runs/g4-s0/eval-test/report.json), and
 [transfer test](../../runs/g4-s0/eval-transfer-test/report.json).
+The [calibration fit](../../runs/g4-s0/eval-cal/calibration.json) and
+[derived decision-test calibrated metrics](../../runs/g4-s0/eval-test/calibration.json)
+are also checked in.
 These are the run's actual report files at their original paths. Per-example
 scoring rows, source data, optimizer state, and weights remain ignored by Git.
 
@@ -42,10 +45,21 @@ The calibration split scored 0.7909 clean accuracy (1,148 questions) at raw
 T=1. A temperature of **1.6245047927124707** was fitted on that split and
 written to `checkpoint/gev.json` after the decision-test report had been
 generated, but before the transfer-development and transfer-test reports. The
-decision-test report therefore records only raw metrics. The latter two reports
-also include `clean_calibrated`: on transfer test, accuracy remains 0.6250,
-while Brier is 0.4491, NLL is 0.7515, and ECE is 0.0571. All four rows of the
-table above compare the saved *raw* scores; the decision test was not rerun.
+decision-test report therefore records only raw metrics. Its separate
+`calibration.json` applies the **already fitted** temperature to its saved raw
+logits, without refitting on test data or rerunning inference. It records the
+source report and row hashes so the derived values can be traced back to the
+original evaluation. The transfer reports also include `clean_calibrated`:
+
+| Clean test metric | decision-v7 raw / calibrated | transfer-v4 raw / calibrated |
+| --- | ---: | ---: |
+| Accuracy | 0.8292 / 0.8292 | 0.6250 / 0.6250 |
+| Brier ↓ | 0.2457 / 0.2336 | 0.4680 / 0.4491 |
+| NLL ↓ | 0.4709 / 0.4198 | 0.8340 / 0.7515 |
+| ECE ↓ | 0.0661 / 0.0170 | 0.1136 / 0.0571 |
+
+All four rows of the headline table above compare the saved *raw* scores; the
+decision test was not rerun.
 
 ## Published Kev reference
 

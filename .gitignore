@@ -24,6 +24,8 @@ __pycache__/
 !/runs/g4-s0/eval-*/
 /runs/g4-s0/eval-*/*
 !/runs/g4-s0/eval-*/report.json
+!/runs/g4-s0/eval-cal/calibration.json
+!/runs/g4-s0/eval-test/calibration.json
 /dist/
 *.safetensors
 *.pt
